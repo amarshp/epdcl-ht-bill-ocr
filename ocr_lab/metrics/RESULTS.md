@@ -28,11 +28,16 @@
 |---------------------|----------------------|-------|------|-------|-----|-------------------------------|
 | v1_shear_parser     | 80.0% (148/185)      | 85%   | 43%  | 95%   | 86% | 10/16 / 3/9                   |
 | v2_rank_consumption | 93.5% (173/185)      | 93%   | 100% | 95%   | 86% | 14/16 / —                     |
-| **v5_champion**     | **98.9%** (183/185)  | 99%   | 100% | 100%  | 95% | **14/16 / 5/9**               |
+| v5 (subset score)   | 98.9% (183/185)      | 99%   | 100% | 100%  | 95% | 14/16 / 5/9                   |
+| **v6 (ALL fields)** | **98.0%** (201/205)  | 99%   | 94%  | 100%  | 96% | **14/16 / 5/9** (+other 100%) |
 
-v5 reconcile per-check — dev: sub_total 16/16, total 16/16, net_bill 15/15, net_payable 14/16 (88%).
-test: sub_total 6/9, total 6/9, net_bill 5/8, net_payable 5/9.
-The 2 dev GT misses are OCR garbles on p160 (watermark over arrears value + dropped 'i' in category), not binding.
+**v6 is the HONEST headline** (codex review #2): scores EVERY frozen GT field (adds cons_lf,
+contracted_md, amount_words) and REQUIRES provenance (observed + source_boxes + not ambiguous)
+— a value without provenance scores as a miss even if correct. See metrics/CODEX_REVIEW2.md.
+v6 reconcile per-check — dev: sub_total 16/16, total 16/16, net_bill 15/15, net_payable 14/16.
+The 4 dev misses (p8/p256 cons_lf faint; p160 arrears under watermark + category dropped 'i')
+are all OCR RECOGNITION failures, not binding — 5/8 bill pages are 100% field-exact.
+Alternate: sparse.py handles the p262 sparse template (9/9 fields) as a separate class.
 
 ## Iterations (hypothesis → change → delta → keep/revert)
 1. **Rank-align upper table** (shear-proof) + wide y_lo margin + split margin + trailing-OCR-noise + width 0.40 +
