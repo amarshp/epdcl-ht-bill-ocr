@@ -1,26 +1,26 @@
 {
-  "approach": "v2_rank_consumption",
-  "git_commit": "61f3fe0",
-  "run": "python eval.py --gt --split dev",
+  "approach": "v5_champion",
+  "git_commit": "0a3de8c",
+  "run": "cd ocr_lab && python run_full.py 262   # -> outputs/{extract.jsonl,table.csv,coverage.json}",
   "deps": "rapidocr-onnxruntime, pypdf, PIL, opencv-python, numpy, onnxruntime (CPU)",
   "cache_variant": "base",
   "metrics": {
-    "gt_field_exact_dev": "93.5% (173/185)",
-    "money": "93%",
+    "gt_field_exact_dev": "98.9% (183/185)",
+    "money": "99%",
     "consumption": "100%",
-    "dates": "95%",
-    "ids": "86%",
+    "dates": "100%",
+    "ids": "95%",
     "reconcile_chain_ok_dev": "14/16",
-    "sub_total": "100%",
-    "total": "100%",
-    "net_bill": "100%",
-    "net_payable": "88%"
+    "reconcile_chain_ok_test": "5/9",
+    "dev_percheck": "subT 16/16, total 16/16, net_bill 15/15, net_payable 14/16"
   },
   "gt_version": "frozen 9-page vision GT (committed)",
   "known_failures": [
-    "money 8 misses (p48/160/256 adj rows)",
-    "ids 3 misses (category IB, p262 VSP-1154)",
-    "cons_lf faint OCR p8/p256",
+    "p136 fppca OCR digit misread",
+    "p72 excess-energy just-left of money col",
+    "p56 stray 20",
+    "p104 arrears",
+    "p160 arrears under watermark",
     "p262 sparse + p144 statement out-of-template"
   ]
 }

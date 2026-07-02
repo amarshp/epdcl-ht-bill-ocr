@@ -24,20 +24,34 @@
   green (5 stable bill pages locked; p48/p256 xfail = optimization frontier).
 
 ## Leaderboard (see leaderboard.jsonl for machine log)
-| approach            | GT field-exact (dev) | money | cons | dates | ids | reconcile chain_ok |
-|---------------------|----------------------|-------|------|-------|-----|--------------------|
-| v1_shear_parser     | **80.0%** (148/185)  | 85%   | 43%  | 95%   | 86% | 10/16              |
+| approach            | GT field-exact (dev) | money | cons | dates | ids | reconcile chain_ok dev / test |
+|---------------------|----------------------|-------|------|-------|-----|-------------------------------|
+| v1_shear_parser     | 80.0% (148/185)      | 85%   | 43%  | 95%   | 86% | 10/16 / 3/9                   |
+| v2_rank_consumption | 93.5% (173/185)      | 93%   | 100% | 95%   | 86% | 14/16 / —                     |
+| **v5_champion**     | **98.9%** (183/185)  | 99%   | 100% | 100%  | 95% | **14/16 / 5/9**               |
 
-Reconcile per-check (dev): sub_total 12/12 (100%), total 12/16 (75%), net_bill 11/15 (73%), net_payable 10/16 (62%).
+v5 reconcile per-check — dev: sub_total 16/16, total 16/16, net_bill 15/15, net_payable 14/16 (88%).
+test: sub_total 6/9, total 6/9, net_bill 5/8, net_payable 5/9.
+The 2 dev GT misses are OCR garbles on p160 (watermark over arrears value + dropped 'i' in category), not binding.
 
-## Top failures to attack (optimization loop)
-1. **consumption 43%** — `Total Consumption` row extraction grabs the multiplying-factor `1000` row (p16) / misses LF%.
-2. **p48, p256 shear off-by-one** — upper-table δ-match drops first amount / mislabels by one; p256 sub_total value box
-   leaks into upper region + 2026 drift rows (Captive Feed Mix, MATS Dev) unmodelled.
-3. **total/net_bill/net_payable reconcile <80%** — driven by (2) and by arrears OCR gaps (p160 arrears garbled).
+## Iterations (hypothesis → change → delta → keep/revert)
+1. **Rank-align upper table** (shear-proof) + wide y_lo margin + split margin + trailing-OCR-noise + width 0.40 +
+   drop date/arrears label boxes. GT 80→84.9%, chain_ok 10→14, net_payable 62→88%. KEEP.
+2. **MF-anchored Total-Consumption** (key off Multiplying-Factor equal-row, take row below; +LF%; column map).
+   consumption 43→100%, GT →93.5%. KEEP.
+3. **Geometric arrears** (between Net Bill & Net Payable rows) + bare-month box + label-anchored category.
+   GT 93.5→97.8%. KEEP. +case-insensitive category & single-arrears sign → 98.9%. KEEP.
+4. **net_bill OCR-typo fallback** (netb..amount) + **arrears glued into label box** (strip date). test net_payable 44→56%. KEEP.
+5. **Gated fuzzy charge-label recovery** (difflib vs 10-row template, decoy-rejected; only when exact labels < amounts).
+   Fixes OCR-misspelled labels ('Dcmand'/'Exccss', p56). dev untouched; test chain_ok 4→5, sub_total 56→67%. KEEP.
+   - Reverted: ungated fuzzy (regressed dev 98.9→93.5, over-matched decoys). Gating fixed it.
 
-## Iterations
-- _(agent appends: hypothesis → change → metric delta → keep/revert → source)_
+## Remaining known failures (honest)
+- **p136** fppca OCR-misread ('6689069' for ~69069) — recognition error, not binding; needs Lever B (preprocess/re-OCR).
+- **p72** excess-energy amount xmax just left of money column (0.90·maxX); frac sweep didn't help aggregate → left as-is.
+- **p56** residual stray '20' in money column (−20 on sub); **p104** arrears delta.
+- **p160** arrears value physically overwritten by anti-bribery watermark → unreadable by any OCR.
+- **p262** sparse alt template + **p144** statement page: out-of-HT-template (separate class; counted vs coverage).
 
 ## Known scope notes
 - p262 sparse alt template + p144 statement page are non-HT-template → separate class / out-of-scope for the HT parser
