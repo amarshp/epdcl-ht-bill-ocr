@@ -136,6 +136,8 @@ CATALOG = [
     ("total",          "val", +1, ["total"]),   # generic 'total' LAST
 ]
 
+_NETBILL_FUZZY = re.compile(r"netb\w{0,3}am\w{0,2}t")   # 'Net Bll Amount' OCR typo
+
 def classify(label):
     n = norm(label)
     if not n:
@@ -144,6 +146,8 @@ def classify(label):
         for k in keys:
             if k in n:
                 return field, section, sign
+    if _NETBILL_FUZZY.search(n):
+        return "net_bill", "val", +1
     return None
 
 # ---- record building -------------------------------------------------------
@@ -297,10 +301,10 @@ def build_records(boxes, band=16):
         r = _rec(field, section, sign, mb, label_text, left, rule)
         if r:
             recs.append(r)
-    recs = _fix_arrears(recs, lower)
+    recs = _fix_arrears(recs, lower, boxes)
     return recs
 
-def _fix_arrears(recs, lower_money):
+def _fix_arrears(recs, lower_money, all_boxes):
     """Re-bind arrears by geometry: the prev/current arrears value boxes are the
     money boxes strictly BETWEEN the Net Bill and Net Payable value rows, top->down
     (prev then current). Robust to the offset that mis-binds them to labels."""
@@ -315,22 +319,46 @@ def _fix_arrears(recs, lower_money):
     if not between:
         return recs
     recs = [r for r in recs if r["field"] not in ("arrears_prev", "arrears_curr")]
-    fields_order = ["arrears_prev", "arrears_curr"]
-    # one value box only: a 0 is the prev-year arrears; a nonzero is current-year
     if len(between) >= 2:
         picks = between
-    else:
+    elif between:
         v0 = parse_num(between[0][3])[0]
         picks = [between[0], None] if (v0 is not None and abs(v0) < 0.005) else [None, between[0]]
-    for fld, mb in zip(fields_order, picks[:2]):
-        if mb is None:
+    else:
+        picks = [None, None]
+    for fld, mb in zip(["arrears_prev", "arrears_curr"], picks[:2]):
+        if mb is not None:
+            v, raw = parse_num(mb[3])
+            if v is not None:
+                recs.append({"field": fld, "section": "pay", "value": signed_value(v, raw, 1),
+                             "raw_text": mb[3], "amount_bbox": [mb[0], mb[1], mb[2]],
+                             "label_text": fld, "source_boxes": [list(mb)],
+                             "rule": f"arrears_geom:{fld}"})
+    recs = _arrears_from_labels(recs, all_boxes)
+    return recs
+
+_DATE_STRIP = re.compile(r"\d{1,2}-[A-Za-z]{3}-\d{4}")
+
+def _arrears_from_labels(recs, all_boxes):
+    """Some bills glue the arrears amount into its label box
+    ('(CurrentYears)Arrears after01-Apr-2023 201909.00'). If a slot is still empty,
+    strip the date and read the trailing amount from the label box itself."""
+    if all_boxes is None:
+        return recs
+    have = {r["field"] for r in recs}
+    for fld, key in (("arrears_prev", "arrearsbefore"), ("arrears_curr", "arrearsafter")):
+        if fld in have:
             continue
-        v, raw = parse_num(mb[3])
-        if v is None:
-            continue
-        recs.append({"field": fld, "section": "pay", "value": signed_value(v, raw, 1),
-                     "raw_text": mb[3], "amount_bbox": [mb[0], mb[1], mb[2]],
-                     "label_text": fld, "source_boxes": [list(mb)], "rule": f"arrears_geom:{fld}"})
+        for b in all_boxes:
+            if key in norm(b[3]):
+                rest = _DATE_STRIP.sub("", b[3])
+                v, raw = parse_num(rest)
+                if v is not None and abs(v) > 4:      # skip stray year fragments
+                    recs.append({"field": fld, "section": "pay",
+                                 "value": signed_value(v, raw, 1), "raw_text": b[3],
+                                 "amount_bbox": [b[0], b[1], b[2]], "label_text": fld,
+                                 "source_boxes": [list(b)], "rule": f"arrears_label:{fld}"})
+                break
     return recs
 
 # ---- field dict with provenance -------------------------------------------
