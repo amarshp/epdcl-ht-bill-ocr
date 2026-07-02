@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from common import ocr, classify
 from parse import parse
 from reconcile import reconcile
+from sparse import is_sparse, sparse_parse
 
 ROOT = os.path.dirname(__file__)
 OUT = os.path.join(ROOT, "outputs")
@@ -36,7 +37,12 @@ def main():
             kind = classify(boxes)
             kinds[kind] = kinds.get(kind, 0) + 1
             row = {"page": p, "doc_type": kind}
-            if kind in ("HT_BILL", "BILL?"):
+            if kind in ("HT_BILL", "BILL?") and is_sparse(boxes):
+                fields = sparse_parse(boxes)          # alternate sparse template
+                row["doc_type"] = "sparse_bill"; row["fields"] = fields
+                cw.writerow([p] + [fields.get(k, {}).get("value") for k in FLAT]
+                            + [None, "sparse_bill"])
+            elif kind in ("HT_BILL", "BILL?"):
                 fields, recs = parse(boxes)
                 rec = reconcile(fields, recs)
                 bills += 1; chain_ok += rec["chain_ok"]

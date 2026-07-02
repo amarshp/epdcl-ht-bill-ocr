@@ -561,6 +561,9 @@ def consumption_fields(boxes):
                 cols[key] = cx
     if not all(k in cols for k in ("cons_kwh", "cons_kvah", "cons_kva")):
         return out
+    # bound the search to the consumption block: above the charge table (Demand
+    # Normal label) so an equal-valued charge row can't be mistaken for MF.
+    y_charges = min((b[0] for b in boxes if "demandchargesnormal" in norm(b[3])), default=1e9)
 
     def col_of(b):
         c = (b[1] + b[2]) / 2
@@ -568,7 +571,7 @@ def consumption_fields(boxes):
         return best if abs(cols[best] - c) <= 60 else None
 
     # cluster numeric boxes that fall in a known column into value rows
-    vals = [(b, col_of(b)) for b in boxes if parse_num(b[3])[0] is not None]
+    vals = [(b, col_of(b)) for b in boxes if parse_num(b[3])[0] is not None and b[0] < y_charges]
     vals = [(b, c) for b, c in vals if c is not None]
     vals.sort(key=lambda t: t[0][0])
     rows_, cur, y0 = [], [], None
