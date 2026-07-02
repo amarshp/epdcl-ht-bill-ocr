@@ -88,6 +88,7 @@ Many of these problems are solved. Before hand-rolling, search: "PaddleOCR table
 Stop the primary approach when: PAGE-OK rate plateaus (no gain over several iterations across DEV **and** held-out TEST), per-field accuracy is high on the codex pseudo-GT sample, **and** codex review says it can't be meaningfully improved locally. THEN: keep the champion safe in `best/` and **spawn ≥1 alternate approach** (e.g. PP-StructureV3 table-grid path, or a template-zone path) to try to beat the champion. Adopt an alternate only if it strictly wins. Repeat until alternates stop beating the champion.
 
 ## GUARDRAILS
+- **Git is initialized.** Commit after every accepted improvement (`git add -A && git commit -m "<approach>: PAGE-OK x/16 -> y/16"`). This is your rollback net — if a change wrecks the env or metric, `git reset --hard` to the last green commit. Never force-push; never delete history.
 - `ocr_lab/best/` = current champion, always runnable. Snapshot before risky changes.
 - Every eval auto-logs to `metrics/leaderboard.jsonl`. Keep `RESULTS.md` as the human-readable running log: what tried, metric delta, why kept/reverted, sources.
 - Version approaches by name (`baseline_v0`, `bind_v1_exactlabel`, `pp_structure_v1`, ...). Never overwrite history.
