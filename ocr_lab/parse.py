@@ -316,8 +316,12 @@ def _fix_arrears(recs, lower_money):
         return recs
     recs = [r for r in recs if r["field"] not in ("arrears_prev", "arrears_curr")]
     fields_order = ["arrears_prev", "arrears_curr"]
-    # if only one value box, it is the current-year arrears (prev is usually 0/absent)
-    picks = between if len(between) >= 2 else [None] + between
+    # one value box only: a 0 is the prev-year arrears; a nonzero is current-year
+    if len(between) >= 2:
+        picks = between
+    else:
+        v0 = parse_num(between[0][3])[0]
+        picks = [between[0], None] if (v0 is not None and abs(v0) < 0.005) else [None, between[0]]
     for fld, mb in zip(fields_order, picks[:2]):
         if mb is None:
             continue
@@ -398,7 +402,7 @@ def nonmoney_fields(boxes):
     catlab = next((x for x in boxes if norm(x[3]) == "category"), None)
     if catlab is not None:
         rowcands = [x for x in boxes if x[1] > catlab[2] and abs(x[0] - catlab[0]) <= 20
-                    and re.match(r"^I{1,3}[ABC]?(\([ivx]+\))?$", x[3].strip().replace(" ", ""))]
+                    and re.match(r"^I{1,3}[ABC]?(\([ivx]+\))?$", x[3].strip().replace(" ", ""), re.I)]
         if rowcands:
             cb = min(rowcands, key=lambda x: x[1])
             add("category", re.match(r"(.*)", cb[3].strip()), cb, "row:category")
