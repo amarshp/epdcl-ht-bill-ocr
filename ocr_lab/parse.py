@@ -186,17 +186,58 @@ def _rec(field, section, sign, mb, label_text, left, rule):
         "rule": rule,
     }
 
-def _upper_labels(boxes, y_lo, y_hi):
-    """Charge labels (section 'sub') between y_lo and y_hi, sorted top->down."""
+# canonical normalized labels for the 10 upper charge rows (template order)
+_SUB_CANON = [
+    ("demand_normal", +1, "demandchargesnormalrate"),
+    ("demand_penal",  +1, "demandchargespenalrate"),
+    ("energy_charges",+1, "energychargesrateallunits"),
+    ("excess_energy", +1, "excessenergychargesrate"),
+    ("elec_duty",     +1, "electricitydutycharges"),
+    ("fuel_surcharge",+1, "fuelsurchargeadjustment"),
+    ("trueup",        +1, "trueupcharge"),
+    ("fppca",         +1, "fppcacharge"),
+    ("tod_charges",   +1, "todcharges"),
+    ("tod_incentive", -1, "todincentive"),
+]
+# non-charge rows that resemble charge labels -> must NOT fuzzy-match to one
+_SUB_DECOYS = ["colonychargesrates", "landfchargesrate", "lfchargesrate",
+               "energychargesincludefuelcostadj", "supplyername", "maincomsumption",
+               "monthlyminconsumption", "totalconsumption"]
+
+def _sub_fuzzy(text):
+    """OCR-noise-tolerant charge-label match ('Dcmand','Exccss'). Rejects decoys."""
+    from difflib import SequenceMatcher
+    n = norm(text)
+    if len(n) < 6:
+        return None
+    def r(a, b):
+        return SequenceMatcher(None, a[:len(b) + 4], b).ratio()
+    field, sign, canon = max(_SUB_CANON, key=lambda c: r(n, c[2]))
+    best = r(n, canon)
+    if best < 0.84:
+        return None
+    if any(r(n, d) >= best for d in _SUB_DECOYS):
+        return None
+    return field, sign
+
+def _upper_labels(boxes, y_lo, y_hi, fuzzy=False):
+    """Charge labels (section 'sub') between y_lo and y_hi, sorted top->down.
+    fuzzy=True adds OCR-noise-tolerant matches for boxes exact matching missed."""
     max_x = max(x[2] for x in boxes)
-    out = []
+    out, seen = [], set()
     for b in boxes:
-        if not (y_lo <= b[0] < y_hi):
+        if not (y_lo <= b[0] < y_hi) or b[2] >= 0.85 * max_x:
             continue
         hit = classify(_nonnum_prefix(b[3]) or norm(b[3]))
-        # keep charge labels; skip right-aligned money-column boxes
-        if hit and hit[1] == "sub" and b[2] < 0.85 * max_x:
-            out.append((b[0], hit[0], hit[2], b))
+        if hit and hit[1] == "sub":
+            out.append((b[0], hit[0], hit[2], b)); seen.add(hit[0])
+    if fuzzy:
+        for b in boxes:
+            if not (y_lo <= b[0] < y_hi) or b[2] >= 0.85 * max_x:
+                continue
+            fh = _sub_fuzzy(b[3])
+            if fh and fh[0] not in seen:
+                out.append((b[0], fh[0], fh[1], b)); seen.add(fh[0])
     out.sort(key=lambda t: t[0])
     return out
 
@@ -233,9 +274,16 @@ def bind_upper(boxes, upper_amounts, y_lo, y_hi):
     grid-searched vertical-offset greedy match.
     """
     labels = _upper_labels(boxes, y_lo, y_hi)
+    amounts = sorted(upper_amounts, key=lambda t: t[0])
+    # GATED fuzzy recovery: only when exact labels are FEWER than amounts (OCR
+    # dropped a charge label). Never runs when exact already count-matches, so the
+    # proven dev path is untouched.
+    if len(labels) < len(amounts):
+        fl = _upper_labels(boxes, y_lo, y_hi, fuzzy=True)
+        if len(labels) < len(fl) <= len(amounts):
+            labels = fl
     if not labels or not upper_amounts:
         return []
-    amounts = sorted(upper_amounts, key=lambda t: t[0])
     if len(amounts) == len(labels):
         pairs = [(mb, lab) for (_, mb), lab in zip(amounts, labels)]
         rule_tag = "rank"
