@@ -1,18 +1,21 @@
 {
-  "approach": "v5_champion",
-  "git_commit": "0a3de8c",
+  "approach": "v6_champion_honest_allfields",
+  "git_commit": "bf79dee",
   "run": "cd ocr_lab && python run_full.py 262   # -> outputs/{extract.jsonl,table.csv,coverage.json}",
   "deps": "rapidocr-onnxruntime, pypdf, PIL, opencv-python, numpy, onnxruntime (CPU)",
   "cache_variant": "base",
   "metrics": {
-    "gt_field_exact_dev": "98.9% (183/185)",
+    "gt_field_exact_dev_ALLFIELDS": "98.0% (201/205, provenance-enforced)",
     "money": "99%",
-    "consumption": "100%",
+    "consumption": "94%",
     "dates": "100%",
-    "ids": "95%",
+    "ids": "96%",
+    "amount_words": "100%",
     "reconcile_chain_ok_dev": "14/16",
     "reconcile_chain_ok_test": "5/9",
-    "dev_percheck": "subT 16/16, total 16/16, net_bill 15/15, net_payable 14/16"
+    "FULL262_coverage": "HT 232 / sparse 10 / BILL? 2 / OTHER 18 (262/262 handled)",
+    "FULL262_reconcile": "subT 95%, total 90%, net_bill 81%, net_payable 72%, chain_ok 158/234=67.5%",
+    "FULL262_field_presence": "service_no 100%, bill_month 100%, net_payable 98%"
   },
   "gt_version": "frozen 9-page vision GT (committed)",
   "known_failures": [
@@ -22,5 +25,6 @@
     "p104 arrears",
     "p160 arrears under watermark",
     "p262 sparse + p144 statement out-of-template"
-  ]
+  ],
+  "deliverable": "outputs/{extract.jsonl,table.csv,coverage.json}"
 }

@@ -1,0 +1,12 @@
+{
+  "pages": 262,
+  "kinds": {
+    "OTHER": 18,
+    "HT_BILL": 232,
+    "BILL?": 12
+  },
+  "bill_pages": 234,
+  "chain_ok": 158,
+  "chain_ok_rate": 0.6752,
+  "seconds": 1.5
+}

@@ -67,6 +67,16 @@ Alternate: sparse.py handles the p262 sparse template (9/9 fields) as a separate
 - **p160** arrears value physically overwritten by anti-bribery watermark → unreadable by any OCR.
 - **p262** sparse alt template + **p144** statement page: out-of-HT-template (separate class; counted vs coverage).
 
+## FULL 262-PAGE PRODUCTION RUN (deliverable — outputs/)
+One command: `cd ocr_lab && python run_full.py 262` → `outputs/{extract.jsonl (provenance), table.csv, coverage.json}`.
+OCR of all 262 pages ~93 min (one-time); re-extract from cache ~1.5 s.
+- **Classification / coverage:** HT_BILL 232, sparse_bill 10 (routed to sparse.py), BILL? 2, OTHER(non-bill) 18 → 262/262 pages handled, 0 crashes.
+- **Full-accounting reconcile (all 234 bill pages, observed-only):** sub_total **95%**, total **90%**, net_bill **81%**, net_payable **72%**; all-4-levels chain_ok **158/234 = 67.5%**.
+- **Field presence over 234 HT pages:** service_no **100%**, bill_month **100%**, sub_total/total **96%**, net_payable **98%**, net_bill 84%.
+- Binding is strong (sub_total 95% to the paise); the chain drop at net_bill/net_payable is dominated by
+  arrears/adjustment OCR-recognition noise on tail pages — the documented ceiling, not a binding defect.
+- Frozen-GT field-exact (the PRIMARY metric, measurable only on the 9 GT pages) = 98.0%.
+
 ## How others solve this (prior art) + why our choice
 - **Cloud KV extractors** (AWS Textract AnalyzeExpense, Azure Doc Intelligence prebuilt-invoice,
   Google Doc AI) — highest accuracy, but violate the hard 100%-local/offline constraint. Excluded.

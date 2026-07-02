@@ -362,7 +362,6 @@ def _fix_arrears(recs, lower_money, all_boxes):
         return recs
     y_nb, y_np = nb["amount_bbox"][0], npay["amount_bbox"][0]
     lo, hi = min(y_nb, y_np), max(y_nb, y_np)
-    used = {id(r["source_boxes"][-1]) for r in recs}   # boxes already consumed as totals
     between = sorted([mb for mb in lower_money if lo + 2 < mb[0] < hi - 2], key=lambda b: b[0])
     if not between:
         return recs
@@ -485,8 +484,63 @@ def nonmoney_fields(boxes):
     if "category" not in out:
         m, b = _find(boxes, r"\b(I{1,3}[ABC]?\s?\([iv]+\))")
         add("category", m, b, "regex:category")
+    # contracted MD: value box on the 'Contracted MD' / 'Contract MD' row
+    mdlab = next((x for x in boxes if "contract" in norm(x[3]) and "md" in norm(x[3])), None)
+    if mdlab is not None:
+        # pure-integer box on the label's row (avoid dates/VAN IDs like '-2024')
+        cand = [x for x in boxes if x[1] > mdlab[2] and abs(x[0] - mdlab[0]) <= 18
+                and re.fullmatch(r"\d{2,6}", x[3].strip())]
+        if cand:
+            cb = min(cand, key=lambda x: x[1])
+            out["contracted_md"] = {"value": parse_num(cb[3])[0], "raw_text": cb[3],
+                                    "bbox": [cb[0], cb[1], cb[2]], "source_boxes": [list(cb)],
+                                    "confidence": None, "rule": "row:contracted_md",
+                                    "observed": True, "candidates": []}
+    wv, wb = _words_value(boxes)
+    if wv is not None:
+        out["amount_words_value"] = {"value": wv, "raw_text": wb[3], "bbox": [wb[0], wb[1], wb[2]],
+                                     "source_boxes": [list(wb)], "confidence": None,
+                                     "rule": "words:amount", "observed": True, "candidates": []}
     out.update(consumption_fields(boxes))
     return out
+
+_WORDS = {"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,
+          "ten":10,"eleven":11,"twelve":12,"thirteen":13,"fourteen":14,"fifteen":15,"sixteen":16,
+          "seventeen":17,"eighteen":18,"nineteen":19,"twenty":20,"thirty":30,"forty":40,"fifty":50,
+          "sixty":60,"seventy":70,"eighty":80,"ninety":90,"hundred":100,"thousand":1000,
+          "lakh":100000,"lakhs":100000,"lac":100000,"lacs":100000,"crore":10000000,"crores":10000000}
+
+_WORDS_BY_LEN = sorted(_WORDS, key=len, reverse=True)
+
+def _words_value(boxes):
+    """Parse the '(Rs ... only)' amount-in-words line into a number (magnitude).
+
+    OCR glues the words ('LakhsSeventeenThousandOne'), so we greedily segment the
+    normalized string by longest-matching number word rather than splitting on
+    spaces. Anchored to the box containing 'only'."""
+    wb = next((b for b in boxes if "only" in norm(b[3]) and "rs" in norm(b[3])), None)
+    if wb is None:
+        return None, None
+    s = norm(wb[3])
+    s = re.sub(r"^rs", "", s)
+    s = re.sub(r"only$", "", s)
+    total = cur = 0
+    seen = False
+    i = 0
+    while i < len(s):
+        for w in _WORDS_BY_LEN:
+            if s.startswith(w, i):
+                v = _WORDS[w]; seen = True
+                if v == 100:
+                    cur = (cur or 1) * 100
+                elif v >= 1000:
+                    total += (cur or 1) * v; cur = 0
+                else:
+                    cur += v
+                i += len(w); break
+        else:
+            i += 1                       # skip OCR noise char
+    return (total + cur, wb) if seen else (None, None)
 
 def consumption_fields(boxes):
     """Total-Consumption row values by column (KWH/KVAH/KVA/PF/LF%).
@@ -507,6 +561,9 @@ def consumption_fields(boxes):
                 cols[key] = cx
     if not all(k in cols for k in ("cons_kwh", "cons_kvah", "cons_kva")):
         return out
+    # bound the search to the consumption block: above the charge table (Demand
+    # Normal label) so an equal-valued charge row can't be mistaken for MF.
+    y_charges = min((b[0] for b in boxes if "demandchargesnormal" in norm(b[3])), default=1e9)
 
     def col_of(b):
         c = (b[1] + b[2]) / 2
@@ -514,7 +571,7 @@ def consumption_fields(boxes):
         return best if abs(cols[best] - c) <= 60 else None
 
     # cluster numeric boxes that fall in a known column into value rows
-    vals = [(b, col_of(b)) for b in boxes if parse_num(b[3])[0] is not None]
+    vals = [(b, col_of(b)) for b in boxes if parse_num(b[3])[0] is not None and b[0] < y_charges]
     vals = [(b, c) for b, c in vals if c is not None]
     vals.sort(key=lambda t: t[0][0])
     rows_, cur, y0 = [], [], None

@@ -18,15 +18,18 @@ from reconcile import reconcile
 
 ROOT = os.path.dirname(__file__)
 GT_DIR = os.path.join(ROOT, "samples", "gt")
-CATS = {
-    "money": ["demand_normal","demand_penal","energy_charges","excess_energy","elec_duty",
-              "fppca","tod_charges","tod_incentive","sub_total","customer_charges","grid_support",
-              "pooled_cost","neticd","total","loss_gain","net_bill","arrears_prev","arrears_curr",
-              "net_payable"],
-    "consumption": ["cons_kwh","cons_kvah","cons_kva","cons_pf"],
-    "dates": ["bill_month","bill_date","due_date"],
-    "ids": ["service_no","van_id","category"],
-}
+# category buckets ONLY decide reporting; the scored field set is derived per page
+# from ALL keys present in the frozen GT (so nothing is silently excluded).
+CONS_KEYS = {"cons_kwh","cons_kvah","cons_kva","cons_pf","cons_lf"}
+DATE_KEYS = {"bill_month","bill_date","due_date"}
+ID_KEYS = {"service_no","van_id","category","contracted_md"}
+
+def _bucket(key):
+    if key in CONS_KEYS: return "consumption"
+    if key in DATE_KEYS: return "dates"
+    if key in ID_KEYS: return "ids"
+    if key == "amount_words_value": return "other"
+    return "money"
 
 def _num_eq(a, b, tol=0.01):
     try: return abs(float(a) - float(b)) <= tol
@@ -38,7 +41,7 @@ def _str_eq(a, b):
 
 def match(field, got, exp):
     if got is None: return False
-    if field in CATS["dates"] or field in CATS["ids"]:
+    if field in DATE_KEYS or field in {"service_no","van_id","category"}:
         return _str_eq(got, exp)
     return _num_eq(got, exp)
 
@@ -49,11 +52,18 @@ def gt_pages():
         out[o["page"]] = o
     return out
 
+def _provenance_ok(fp):
+    """A field counts as extracted ONLY if it is observed with real source boxes
+    and is not flagged ambiguous. Enforces the no-imputation / provenance rule."""
+    return bool(fp) and fp.get("observed") is True and fp.get("source_boxes") \
+        and not fp.get("ambiguous")
+
 def score_gt():
-    """Field-exact vs frozen GT, per category. Only ht_bill GT pages are scored
-    field-by-field; sparse/statement report classification correctness."""
+    """Field-exact vs frozen GT over ALL frozen fields (nothing hard-coded out).
+    Provenance is REQUIRED: a value with observed!=True or no source boxes scores
+    as a miss even if it matches."""
     gts = gt_pages()
-    agg = {c: [0, 0] for c in CATS}          # [hit, total]
+    agg = {c: [0, 0] for c in ("money", "consumption", "dates", "ids", "other")}
     per_page = []
     for p in sorted(gts):
         gt = gts[p]
@@ -63,19 +73,21 @@ def score_gt():
             per_page.append((p, gt["doc_type"], kind, None))
             continue
         fields, recs = parse(boxes)
-        got = {}
-        for c, keys in CATS.items():
-            for k in keys:
-                if k not in gt.get("money", {}) and k not in gt.get("consumption", {}) \
-                   and k not in gt.get("dates", {}) and k not in gt.get("ids", {}):
-                    continue
-                exp = (gt.get("money", {}) | gt.get("consumption", {}) |
-                       gt.get("dates", {}) | gt.get("ids", {})).get(k)
-                gv = fields.get(k, {}).get("value") if k in fields else None
-                ok = match(k, gv, exp)
-                agg[c][0] += ok; agg[c][1] += 1
-                got[k] = (gv, exp, ok)
-        hits = sum(1 for v in got.values() if v[2]); tot = len(got)
+        exp_all = {}
+        for sec in ("money", "consumption", "dates", "ids"):
+            exp_all.update(gt.get(sec, {}))
+        if "amount_words_value" in gt:
+            exp_all["amount_words_value"] = gt["amount_words_value"]
+        hits = tot = 0
+        for k, exp in exp_all.items():
+            if exp is None:                      # GT explicitly has no value (e.g. cons_lf None)
+                continue
+            fp = fields.get(k)
+            gv = fp.get("value") if _provenance_ok(fp) else None
+            ok = match(k, gv, exp)
+            c = _bucket(k)
+            agg[c][0] += ok; agg[c][1] += 1
+            hits += ok; tot += 1
         per_page.append((p, "ht_bill", kind, (hits, tot)))
     return agg, per_page
 
@@ -129,14 +141,15 @@ def main():
 
     if a.gt or a.all:
         agg, per_page = score_gt()
-        print("\n== FIELD-EXACT vs FROZEN GT (primary) ==")
-        for c in CATS:
+        print("\n== FIELD-EXACT vs FROZEN GT (all frozen fields, provenance-enforced) ==")
+        cats = [c for c in ("money", "consumption", "dates", "ids", "other") if agg[c][1]]
+        for c in cats:
             h, t = agg[c]
             print(f"  {c:12}: {h}/{t}" + (f" = {h/t:.0%}" if t else ""))
-        tot_h = sum(agg[c][0] for c in CATS); tot_t = sum(agg[c][1] for c in CATS)
+        tot_h = sum(agg[c][0] for c in cats); tot_t = sum(agg[c][1] for c in cats)
         print(f"  {'OVERALL':12}: {tot_h}/{tot_t}" + (f" = {tot_h/tot_t:.1%}" if tot_t else ""))
         print("  per-page:", [(p, k, f"{s[0]}/{s[1]}" if s else "-") for p, d, k, s in per_page])
-        log["gt"] = {c: agg[c] for c in CATS}
+        log["gt"] = {c: agg[c] for c in cats}
 
     rec = score_reconcile(pages)
     print(f"\n== FULL RECONCILE ({a.split}) ==  bills={rec['bills']} chain_ok={rec['chain_ok']}/{rec['bills']}")
