@@ -22,7 +22,7 @@ def _sum(recs, section):
 def _rows(recs, section):
     return [(r["field"], r["value"]) for r in recs if r["section"] == section]
 
-def _check(name, expected, obs_field, add_recs):
+def _check(name, expected, obs_field, add_recs, tol=TOL):
     """Build one check dict. Runs only if observed value is present (observed-only)."""
     if obs_field is None or not obs_field.get("observed"):
         return {"name": name, "status": None, "reason": "no_observed_target",
@@ -31,7 +31,7 @@ def _check(name, expected, obs_field, add_recs):
     delta = round(observed - expected, 2)
     return {
         "name": name,
-        "status": abs(delta) <= TOL,
+        "status": abs(delta) <= tol,
         "expected": round(expected, 2),
         "observed": observed,
         "delta": delta,
@@ -52,8 +52,9 @@ def reconcile(fields, recs):
                _rows(recs, "sub") + _rows(recs, "tot")),
         _check("net_bill",  net, fields.get("net_bill"),
                _rows(recs, "net")),
+        # the bill rounds net_payable to the whole rupee (arrears carry paise)
         _check("net_payable", pay, fields.get("net_payable"),
-               _rows(recs, "pay")),
+               _rows(recs, "pay"), tol=0.51),
     ]
     passed = sum(1 for c in checks if c["status"] is True)
     testable = sum(1 for c in checks if c["status"] is not None)
