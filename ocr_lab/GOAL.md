@@ -41,7 +41,7 @@ Baseline already logged: `metrics/leaderboard.jsonl` → `baseline_v0` = PAGE-OK
 - `total_calc` 0/15 → "Total" collides with "Total Consumption" (need exact/anchored label, not substring).
 - Far-right money column (energy/fppca) sits in its own y-band → target the money x-band, nearest-in-y, not tight-row rightmost.
 
-Also produce **classic OCR metrics** for the final report (see Deliverables): use codex to transcribe a held-out sample of pages as **pseudo-ground-truth**, then compute **CER, WER, and numeric-field exact-match** of your pipeline vs that. Plus throughput (pages/min) and peak RAM.
+Also produce **classic OCR metrics** for the final report (see Deliverables): **transcribe a held-out sample of pages with your own vision** (Read the rendered PNGs; codex as backup) to build **pseudo-ground-truth**, then compute **CER, WER, and numeric-field exact-match** of your pipeline vs that. Plus throughput (pages/min) and peak RAM.
 
 ## The LOOP (run this until stop criteria)
 ```
@@ -79,13 +79,18 @@ Fast inner loop = cached dev pages only. When you change OCR/preprocessing (not 
 ## RESEARCH mandate
 Many of these problems are solved. Before hand-rolling, search: "PaddleOCR table structure recognition", "invoice key-value extraction OCR bounding boxes", "electricity bill OCR pipeline", "RapidOCR det parameters small text", "OpenVINO onnxruntime Arc iGPU". Trace the exact failing symptom to a known cause. Cite what you adopt in RESULTS.md.
 
-## CODEX usage (it's better at vision — lean on it)
-- **Vision grading (pseudo-GT):** `python render.py <p>` → PNG, then have codex read the image and transcribe/verify fields. Use to build CER/WER ground-truth and to adjudicate cross-engine disagreements. Verify `codex` image syntax via `codex --help` first.
-- **Diagnosis:** when stuck >2 iterations on a check, hand codex the page image + your extracted fields + OCR boxes and ask what's mis-bound.
-- **Final review:** when plateaued, ask codex to review the pipeline + metrics and answer: *"can this be made more accurate or cheaper, locally? what's the strongest remaining failure?"* Only treat the goal as done when codex agrees it's near-optimal. Record the verdict.
+## GRADING & GROUND-TRUTH — use YOUR OWN free vision + reasoning (no external API)
+**You (the agent running this goal) ARE Claude Opus 4.8 with vision.** That is a free "eyes + brain" you can use for grading, ground-truth, adjudication, and review — it is NOT an external API and costs the pipeline nothing. Use it as the PRIMARY judge. Codex is a free SECOND opinion.
+
+**Hard rule:** self-vision/codex are for BUILD-TIME grading & review only. The **production pipeline must stay 100% local/offline** (RapidOCR/Paddle/Tesseract). Never make Claude-vision or codex a runtime dependency of the monthly extractor.
+
+- **Pseudo-ground-truth (primary):** `python render.py <p>` → PNG, then **Read the PNG yourself** and transcribe the fields/numbers by eye. Save to `samples/gt/p<n>.json`. Use these as ground truth to compute **CER / WER / numeric exact-match** for your pipeline. Build GT for the held-out TEST bills + a few outliers. Trust your own read over OCR when they conflict — but if unsure on a faint digit, zoom (render at higher scale) and/or ask codex to confirm.
+- **Adjudication:** when two OCR engines disagree on a number, Read the page image yourself and decide the truth. Codex = tie-breaker if you're uncertain.
+- **Diagnosis:** stuck >2 iterations on a check? Read the page PNG + your extracted fields + the OCR boxes and reason about what's mis-bound. This is often faster than blind rule-tuning.
+- **Final review (two independent gates):** when plateaued, (1) do your own critical self-review reading several pages against the pipeline output, AND (2) ask codex *"can this be more accurate or cheaper, locally? strongest remaining failure?"*. Treat the goal as done only when BOTH agree it's near-optimal. Record both verdicts.
 
 ## STOP criteria
-Stop the primary approach when: PAGE-OK rate plateaus (no gain over several iterations across DEV **and** held-out TEST), per-field accuracy is high on the codex pseudo-GT sample, **and** codex review says it can't be meaningfully improved locally. THEN: keep the champion safe in `best/` and **spawn ≥1 alternate approach** (e.g. PP-StructureV3 table-grid path, or a template-zone path) to try to beat the champion. Adopt an alternate only if it strictly wins. Repeat until alternates stop beating the champion.
+Stop the primary approach when: PAGE-OK rate plateaus (no gain over several iterations across DEV **and** held-out TEST), per-field accuracy is high on the vision pseudo-GT sample, **and** BOTH your own critical self-review AND codex review say it can't be meaningfully improved locally. THEN: keep the champion safe in `best/` and **spawn ≥1 alternate approach** (e.g. PP-StructureV3 table-grid path, or a template-zone path) to try to beat the champion. Adopt an alternate only if it strictly wins. Repeat until alternates stop beating the champion.
 
 ## GUARDRAILS
 - **Git is initialized.** Commit after every accepted improvement (`git add -A && git commit -m "<approach>: PAGE-OK x/16 -> y/16"`). This is your rollback net — if a change wrecks the env or metric, `git reset --hard` to the last green commit. Never force-push; never delete history.
@@ -96,9 +101,9 @@ Stop the primary approach when: PAGE-OK rate plateaus (no gain over several iter
 
 ## DELIVERABLES (produce `metrics/RESULTS.md` at the end)
 1. **Champion pipeline** in `best/`, one command to run on the full PDF.
-2. **Metrics table**: PAGE-OK reconcile rate (dev + held-out), per-check pass %, per-field accuracy, **CER / WER / numeric exact-match vs codex pseudo-GT**, cross-engine agreement %, throughput (pages/min), peak RAM, coverage (% pages parsed).
+2. **Metrics table**: PAGE-OK reconcile rate (dev + held-out), per-check pass %, per-field accuracy, **CER / WER / numeric exact-match vs your vision pseudo-GT**, cross-engine agreement %, throughput (pages/min), peak RAM, coverage (% pages parsed).
 3. **Leaderboard** of every approach tried, ranked.
-4. **Codex final verdict** ("can't do better locally" + strongest remaining weakness).
+4. **Two final verdicts**: your own self-review + codex ("can't do better locally" + strongest remaining weakness).
 5. **Alternate approaches** tried and whether they beat the champion.
 6. Short **"how others solve this"** notes with the sources you used.
 
