@@ -51,6 +51,15 @@ Alternate: sparse.py handles the p262 sparse template (9/9 fields) as a separate
    Fixes OCR-misspelled labels ('Dcmand'/'Exccss', p56). dev untouched; test chain_ok 4→5, sub_total 56→67%. KEEP.
    - Reverted: ungated fuzzy (regressed dev 98.9→93.5, over-matched decoys). Gating fixed it.
 
+## Alternates tried (did any beat the champion?)
+- **sparse.py (p262 sparse template)** — SEPARATE class, not a champion replacement. 9/9 fields on p262.
+  Adopted as an additive route in run_full (routes `is_sparse()` pages), improves coverage. KEEP.
+- **Lever B preprocessing (preprocess.py: upscale/otsu/clahe/deskew)** — tested re-OCR on p136's misread
+  fppca digit. Did NOT recover it (OCR consistently misreads that amount box). The value IS recoverable
+  by summing the printed FPPCA component expression `(15488.25+33724.00+19856.74)=69068.99`, but that
+  edges into the derived-value concern (codex #3) and p136 has no frozen GT — DEFERRED, not adopted.
+  Verdict: pixel preprocessing alone does not beat the champion here.
+
 ## Remaining known failures (honest)
 - **p136** fppca OCR-misread ('6689069' for ~69069) — recognition error, not binding; needs Lever B (preprocess/re-OCR).
 - **p72** excess-energy amount xmax just left of money column (0.90·maxX); frac sweep didn't help aggregate → left as-is.
