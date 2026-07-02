@@ -20,8 +20,8 @@ def gt(p):
 # Frontier pages: known parser gaps (shear off-by-one on p48; drift + subtotal
 # leak on p256) — the optimization loop's first target. xfail(strict) so the
 # suite goes RED the moment they're fixed, prompting promotion to stable.
-BILL_PAGES = [8, 16, 32, 128, 160]
-FRONTIER = [48, 256]
+BILL_PAGES = [8, 16, 32, 48, 128, 160, 256]
+FRONTIER = []
 
 @pytest.mark.parametrize("p", BILL_PAGES + [
     pytest.param(q, marks=pytest.mark.xfail(strict=True, reason="optimization frontier"))
