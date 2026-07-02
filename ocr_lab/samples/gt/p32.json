@@ -1,0 +1,45 @@
+{
+  "page": 32,
+  "doc_type": "ht_bill",
+  "source": "claude_opus_vision_pseudo_gt",
+  "frozen": true,
+  "money": {
+    "demand_normal": 0.0,
+    "demand_penal": 0.0,
+    "energy_charges": 85002.75,
+    "excess_energy": 0.0,
+    "elec_duty": 39186.0,
+    "fppca": 9481.6,
+    "tod_charges": 0.0,
+    "tod_incentive": 0.0,
+    "sub_total": 133670.35,
+    "customer_charges": 1406.0,
+    "grid_support": 7500.0,
+    "total": 142576.35,
+    "pooled_cost": -142576.0,
+    "loss_gain": -0.35,
+    "net_bill": 0.0,
+    "arrears_prev": 0.0,
+    "arrears_curr": -37450.0,
+    "net_payable": -37450.0
+  },
+  "consumption": {
+    "cons_kwh": 39186,
+    "cons_kvah": 46226,
+    "cons_kva": 431.08,
+    "cons_pf": 0.85,
+    "cons_lf": null
+  },
+  "dates": {
+    "bill_month": "03/2024",
+    "bill_date": "02-04-2024",
+    "due_date": "16-Apr-2024"
+  },
+  "ids": {
+    "service_no": "VSP212",
+    "van_id": "APEPDC0100000391",
+    "category": "IIA(ii)",
+    "contracted_md": 600
+  },
+  "amount_words_value": 37450
+}

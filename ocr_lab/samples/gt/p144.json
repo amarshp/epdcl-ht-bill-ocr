@@ -1,0 +1,11 @@
+{
+  "page": 144,
+  "doc_type": "statement",
+  "source": "claude_opus_vision_pseudo_gt",
+  "frozen": true,
+  "is_bill": false,
+  "period": "OCTOBER-2025",
+  "net_amount_to_epdcl": 12390530.0,
+  "total_ht_bill": 13297772.0,
+  "rows": 13
+}

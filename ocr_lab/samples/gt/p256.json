@@ -1,0 +1,44 @@
+{
+  "page": 256,
+  "doc_type": "ht_bill",
+  "source": "claude_opus_vision_pseudo_gt",
+  "frozen": true,
+  "money": {
+    "demand_normal": 133000.0,
+    "demand_penal": 0.0,
+    "energy_charges": 121137.75,
+    "excess_energy": 0.0,
+    "elec_duty": 850.08,
+    "trueup": 0.0,
+    "fppca": 6776.25,
+    "tod_charges": 4969.0,
+    "tod_incentive": 0.0,
+    "sub_total": 266733.08,
+    "customer_charges": 1406.0,
+    "total": 268139.08,
+    "loss_gain": -0.08,
+    "net_bill": 268139.0,
+    "arrears_prev": 0.0,
+    "arrears_curr": 0.0,
+    "net_payable": 268139.0
+  },
+  "consumption": {
+    "cons_kwh": 20168,
+    "cons_kvah": 21835,
+    "cons_kva": 72.0,
+    "cons_pf": 0.92,
+    "cons_lf": 6
+  },
+  "dates": {
+    "bill_month": "05/2026",
+    "bill_date": "03-06-2026",
+    "due_date": "17-Jun-2026"
+  },
+  "ids": {
+    "service_no": "VSP309",
+    "van_id": "APEPDC0100001933",
+    "category": "IIA(i)",
+    "contracted_md": 350
+  },
+  "amount_words_value": 268139
+}

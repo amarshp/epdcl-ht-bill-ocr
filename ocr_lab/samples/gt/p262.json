@@ -1,0 +1,28 @@
+{
+  "page": 262,
+  "doc_type": "sparse_bill",
+  "source": "claude_opus_vision_pseudo_gt",
+  "frozen": true,
+  "money": {
+    "demand_normal": 1134870.0,
+    "energy_charges": 3699137.5,
+    "elec_duty": 30777.0,
+    "fppca": 91165.51,
+    "tod_charges": 101650.0,
+    "customer_charges": 2813.0,
+    "net_bill": 5060413.01,
+    "net_payable": 5060413.0
+  },
+  "consumption": {
+    "cons_kwh": 512950,
+    "cons_kvah": 532250,
+    "cons_kva": 2389.2
+  },
+  "dates": {
+    "bill_month": "05/2026"
+  },
+  "ids": {
+    "service_no": "VSP1154"
+  },
+  "amount_words_value": 5060413
+}
