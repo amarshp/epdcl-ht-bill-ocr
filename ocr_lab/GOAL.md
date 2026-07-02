@@ -57,6 +57,7 @@ Codex review = **no-go until these exist.** Do them first, commit each.
 **0b. Provenance-carrying extractor output** — change `extract()` from `field→value` to `field→{value, raw_text, bbox, source_boxes, confidence, rule, observed, candidates}`. Reconciliation passes ONLY on `observed` values with source boxes. Ambiguous (multiple candidates satisfy geometry/arithmetic) → FAIL the field, don't silently pick.
 
 **0c. Vision pseudo-GT set** (use YOUR OWN eyes — free, no external API): `python render.py <p>` → Read the PNG → hand-transcribe fields → save `samples/gt/p<n>.json`. Build GT for the hard/representative pages codex identified: **8 (clean), 16 (arrears), 32 (grid+pooled, negative payable), 48 (NetIcd), 128 (large arrears), 160 (negative FPPCA), 256 (2026 drift), 262 (sparse alt template), 1 or 144 (non-bill)**. Label money + dates/IDs + core consumption fields. Codex already transcribed many key values in CODEX_REVIEW.md §Evidence — use as a starting reference but confirm with your own read.
+- **FREEZE THE GROUND TRUTH (loop-engineering rule: the writer must not grade itself).** Once built, `samples/gt/` is IMMUTABLE. Commit it, then never regenerate, edit, or "correct" it during the optimization loop — doing so is grading your own homework and silently games the metric. If you find a genuine GT transcription error, STOP, fix it in a separate labeled commit with the page image as justification, and note it in RESULTS.md — never as part of an optimization step.
 
 **0d. Enforced dev/test/coverage evaluator** — add `TEST_BILLS` (held-out, NOT in dev), and `eval.py --split {dev,test,full,all}`. Denominator includes expected bill pages + skipped/unknown pages. Log field-level metrics, missing-field counts, coverage, and false-pass risk — not just page-level. Add unit tests for the accounting graph using pages 8/16/32/48/128/160/256.
 
@@ -85,7 +86,8 @@ Inner loop = cached dev pages (no OCR). Changing OCR/preprocessing → re-OCR in
 - **E. Non-numeric fields:** service no., billing month, bill/due dates, consumer/category/location, CMD/RMD, KWH/KVAH/KVA totals, PF, LF%, meter readings. Needed to support the "structured fields" claim.
 
 ## GRADING & REVIEW — free vision + reasoning (build-time only)
-- **You ARE Claude Opus 4.8 with vision.** Read rendered PNGs yourself to build pseudo-GT, adjudicate cross-engine disputes, and diagnose mis-binds (often faster than blind rule-tuning). Trust your read over OCR; zoom (higher render scale) or ask codex if unsure.
+- **You ARE Claude Opus 4.8 with vision.** Read rendered PNGs yourself to build the (then-frozen) pseudo-GT, adjudicate cross-engine disputes, and diagnose mis-binds (often faster than blind rule-tuning). Trust your read over OCR; zoom (higher render scale) or ask codex if unsure.
+- **WRITER ≠ GRADER (loop-engineering core rule).** The final score is OBJECTIVE: field-exact-match vs the *frozen* pseudo-GT + full-accounting reconciliation. Your own vision is for *building* GT (before it freezes) and diagnosis — NOT for scoring your own final numbers, and NOT for deciding "looks right." When you need an independent judgment on whether the pipeline is good enough, use **codex** (different model, different instructions), not self-assessment.
 - **Codex** = independent second opinion / tie-breaker / final review.
 - Neither may enter the production runtime path.
 
@@ -96,8 +98,14 @@ Inner loop = cached dev pages (no OCR). Changing OCR/preprocessing → re-OCR in
 - Research must not block a known local fix or stall under restricted network. Time-box it.
 - Version approaches by name. Never overwrite history.
 
-## STOP criteria (objective)
-Stop the primary approach when: field-level accuracy on DEV **and** held-out TEST plateaus over several iterations at a high level, coverage is complete, reconciliation rate (full graph) is high, **and BOTH** your own critical self-review **and** codex agree it can't be meaningfully improved locally. Record both verdicts + the strongest remaining weakness. THEN keep the champion safe and spawn ≥1 alternate (table-structure model path, or template-zone path) to try to beat it; adopt only on a strict win.
+## STOP criteria (objective) + HALT CAPS (loop-engineering: don't loopmaxx)
+**Convergence stop:** field-level accuracy on DEV **and** held-out TEST plateaus over several iterations at a high level, coverage is complete, reconciliation rate (full graph) is high, **and BOTH** your own critical self-review **and** codex agree it can't be meaningfully improved locally. Record both verdicts + strongest remaining weakness. THEN keep champion safe and spawn ≥1 alternate (table-structure model / template-zone path) to try to beat it; adopt only on a strict win.
+
+**Hard halt caps (stop and write RESULTS.md even if not "done" — a loop that never halts is the #1 failure mode):**
+- **No-progress detector:** if the champion's TEST field-accuracy does not improve for **6 consecutive accepted-or-rejected iterations**, stop that approach — you've plateaued; switch to an alternate or halt.
+- **Iteration cap:** max **40 optimization iterations** on the primary approach before forcing a review + alternate.
+- **Time/spend cap:** if wall-clock exceeds ~**6 hours** OR any codex/token budget you're given is ~80% spent, finalize gracefully: snapshot champion, write full metrics, list what remained. Never silently spin.
+- On ANY halt: champion in `best/` must be green + MANIFEST written + RESULTS.md updated. Halting cleanly with a documented result beats grinding.
 
 ## DELIVERABLES (`metrics/RESULTS.md`)
 1. Champion pipeline in `best/` + MANIFEST, one command to run on full PDF, emitting the **full 262-page extracted table (CSV/JSON) with provenance** — the artifact the future dashboard/RAG will consume.
