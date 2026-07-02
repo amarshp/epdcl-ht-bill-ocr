@@ -57,8 +57,10 @@ def classify(boxes):
         return "SPARSE"
     return "OTHER"
 
-# dev set: cached HT bill pages spanning 01/2024..05/2026
+# dev set: cached HT bill pages spanning 01/2024..05/2026 (tune on these)
 DEV_BILLS = [8, 16, 32, 48, 64, 80, 96, 112, 128, 160, 176, 192, 208, 224, 240, 256]
+# held-out test set: NEVER tune against these; OCR once for final validation
+TEST_BILLS = [24, 40, 56, 72, 104, 136, 168, 200, 232, 248]
 
 def norm(s):
     return re.sub(r"[^a-z0-9%]", "", s.lower())

@@ -1,7 +1,15 @@
-"""Self-supervised accuracy metric: the bill's own internal arithmetic.
-No ground truth needed. A page that reconciles is almost certainly bound correctly.
+"""NAIVE smoke-test metric — REPLACE in Phase 0 (see GOAL.md 0a + CODEX_REVIEW.md).
 
-Checks (each independent):
+These 4 checks are a floor/diagnostic ONLY. Codex review proved they:
+  - FALSE-FAIL correct bills with adjustments (arrears/grid-support/NetIcd/neg-FPPCA)
+    e.g. p16 net_bill != net_payable due to arrears; p32 total omits grid support.
+  - FALSE-PASS wrong bindings (commutative sums, duplicate 0.00 rows, same value
+    bound to two fields with no provenance check).
+Phase 0 must replace this with the FULL accounting graph (signed rows, coverage,
+row-level rate*qty==amount, provenance, no-imputation). Do NOT optimize against
+this naive version.
+
+Current checks:
  1. charges_sum : demand+energy+duty+fppca+tod == sub_total
  2. total_calc  : sub_total + customer_charges == total
  3. net_round   : round(net_bill) == net_payable

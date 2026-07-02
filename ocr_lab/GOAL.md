@@ -1,117 +1,116 @@
 # GOAL: Best-possible LOCAL OCR + field extraction for the EPDCL HT-bill PDF
+*(Finalized after adversarial codex review — see `metrics/CODEX_REVIEW.md`. Read that file too.)*
 
-## Mission (one line)
-Iterate — RL-style, autonomously, all night — until you have the **cheapest, highest-accuracy, fully-local** pipeline that turns `Issue-4.pdf` (262-page scanned monthly electricity bills) into **accurate text + structured fields**, self-graded with no ground truth, and **codex-signed-off that it can't be beaten** — then try alternate approaches to beat it anyway.
+## Mission
+Iterate autonomously, all night, until you have the **cheapest, highest-accuracy, fully-local** pipeline that turns `Issue-4.pdf` (262 scanned monthly electricity bills) into **accurate text + provenance-tracked structured fields**, measured by **field-level exact match vs vision pseudo-ground-truth** (primary) and **full-accounting reconciliation** (secondary), with **two independent sign-offs** (your own self-review + codex) that it can't be beaten locally — then try alternates to beat it.
 
-**SCOPE THIS RUN: OCR / extraction ONLY.** Do NOT build the dashboard or RAG agent yet. Just make extraction excellent and measured.
+**SCOPE THIS RUN: OCR / extraction ONLY.** No dashboard, no RAG yet.
 
 ---
 
-## Hard constraints (do not violate)
-- **100% local. No cloud OCR/LLM APIs. No paid services.** Codex CLI is allowed (it's local-invoked) for grading/diagnosis/vision only — never as the production OCR engine.
-- Runs on this laptop: **Intel Core Ultra 9 285H, 32 GB RAM, Intel Arc 140T iGPU, no NVIDIA/CUDA, Windows 11.** CPU or iGPU (DirectML/OpenVINO) only.
-- **Deterministic extraction preferred** over generative — a wrong digit that looks right is the #1 enemy. Detection-based OCR (RapidOCR/Paddle/Tesseract) does not hallucinate numbers; keep it that way.
-- **Never lose the best pipeline.** Snapshot champion into `ocr_lab/best/` before trying anything risky. Keep it green.
-- **Don't guess numbers.** Verify against the actual page image (via codex vision or your own image read). No fabricated values in metrics.
+## HARD CONSTRAINTS
+- **Production pipeline = 100% local, offline, deterministic.** No cloud OCR/LLM APIs, no paid services, ever, at runtime. RapidOCR/Paddle/Tesseract only.
+- Runs on: Intel Core Ultra 9 285H, 32 GB RAM, **Intel Arc 140T iGPU, no CUDA**, Windows 11. CPU or iGPU (DirectML/OpenVINO) only.
+- **Build-time exception (explicit):** your own Claude vision + codex may be used for GRADING, ground-truth, and review only. They are NOT local and must NEVER be a runtime dependency of the monthly extractor. Label this clearly wherever used.
+- **Never lose the champion.** Snapshot to `best/` + git commit before risky changes.
+- **No guessing.** Every scored value must come from a real OCR box (provenance). Verify faint digits against the page image with your own eyes.
 
-## Environment (already set up — don't rediscover)
-- Working dir: `C:\Users\Amarsh\OneDrive\Documents\Personal\OCR`, project in `ocr_lab/`.
-- Python 3.12 (Windows Store build). `pip`/`winget` usable for unattended installs.
-- Installed & verified: `rapidocr-onnxruntime` (CPU ONNX PP-OCR), `pypdf`, `PIL`, `opencv-python`, `numpy`, `pandas`, `onnxruntime` (CPU+Azure providers only).
-- Codex: `codex` CLI v0.135.0 on PATH. Check `codex --help` for image/vision invocation before relying on it.
-- Cache: `ocr_lab/cache/p{n}.json` holds OCR boxes for 19 sampled pages `[ycenter,xmin,xmax,text]`. Inner-loop eval reads cache = instant.
+## ENVIRONMENT (set up — don't rediscover)
+- Dir: `C:\Users\Amarsh\OneDrive\Documents\Personal\OCR`, project `ocr_lab/`. Git initialized.
+- Python 3.12 (Win Store). `pip`/`winget` usable unattended.
+- Installed: `rapidocr-onnxruntime` (CPU ONNX PP-OCR), `pypdf`, `PIL`, `opencv-python`, `numpy`, `pandas`, `onnxruntime` (CPU only).
+- Codex CLI v0.135.0 on PATH (`codex exec "..." -s workspace-write`).
+- Cache: `cache/p{n}.json` = OCR boxes `[ycenter,xmin,xmax,text]` for 19 sampled pages. Inner loop reads cache = instant.
 
-## What is ALREADY ESTABLISHED (build on this — proven, don't relitigate)
-1. **The PDF's embedded text layer is garbage for numbers** (baked-in bad OCR / missing). Must OCR the page images directly. Confirmed on pp.8 & 51.
-2. **RapidOCR reads numbers near-perfectly**: on the hardest page (p8, pure scan) it got **14/14 key numeric fields verbatim** incl. `315595.06`, `152342.10`, `11930.96`, amount-in-words. ~13–16 s/page on CPU.
-3. **The real problem is BINDING** — associating each number to its field. Raw OCR flattens the table (reading order scrambles columns). This is the thing to optimize.
-4. **Document composition** (19-page sample): ~**85% is ONE identical template** (EPDCL HT bill), a monthly series **01/2024 → 05/2026**. ~2–3 non-bill pages (correspondence: p1, p144) + 1 sparse (p262). So: one dominant fixed template + a few outliers.
-5. **The accuracy metric is the bill's own arithmetic** (see below) — self-supervising, no labels.
+## ESTABLISHED FACTS (proven — build on these)
+1. Embedded PDF text layer is garbage for numbers → OCR the images directly.
+2. RapidOCR (CPU) reads numbers verbatim: 14/14 key fields on hardest page (p8). ~13–16 s/page.
+3. Real problem = **binding** numbers to fields, not recognition.
+4. Composition: ~85% one EPDCL HT-bill template, monthly 01/2024→05/2026; ~2–3 non-bill pages; p262 = a DIFFERENT sparse bill layout.
+5. **Bills carry real adjustments** — arrears, grid support, pooled-cost, NetIcd, TCS, negative FPPCA components, TOD incentive. The accounting model MUST handle all of them (evidence in CODEX_REVIEW.md §1).
 
-## The METRIC (self-supervised — this is your reward signal)
-`reconcile.py` checks each page's internal math (all must be independently true on a correct read):
-1. `charges_sum`: demand+energy+duty+fppca+tod == sub_total
-2. `total_calc` : sub_total + customer_charges == total
-3. `net_round`  : round(net_bill) == net_payable
-4. `words_match`: amount-in-words == net_payable
-**Primary reward = PAGE-OK rate** (≥3/4 checks pass, words not contradicted) across bill pages. A page that reconciles is almost certainly bound correctly. Rising PAGE-OK rate = real progress.
+---
 
-Baseline already logged: `metrics/leaderboard.jsonl` → `baseline_v0` = PAGE-OK 0/16, but `charges_sum` 6/9 (signal exists). Known baseline bugs to fix first:
-- `net_payable` returns None → "Net Payable" label match / value adjacency broken (multi-word split; value may be glued as `Rs317001.00`).
-- `total_calc` 0/15 → "Total" collides with "Total Consumption" (need exact/anchored label, not substring).
-- Far-right money column (energy/fppca) sits in its own y-band → target the money x-band, nearest-in-y, not tight-row rightmost.
+## OBJECTIVE (revised — this is the reward)
+Optimize in this priority order:
+1. **PRIMARY: field-level exact-match accuracy vs a fixed vision pseudo-GT set** — reported separately for {money fields, consumption fields, dates, IDs, text}. This is the real target.
+2. **SECONDARY: accounting-reconciliation rate** using the FULL accounting graph (below) — a strong consistency check, NOT the primary reward.
+3. **COVERAGE (required, in every denominator):** % of all expected bill pages AND all 262 PDF pages successfully parsed. Skipped/unknown/failed pages count against you — you cannot inflate scores by excluding hard pages.
+4. **NO-IMPUTATION RULE (required):** a field only counts as extracted if it has a source OCR box. Derived/backfilled values (e.g. `total := subtotal+customer`) may be reported as helper calcs but MUST NOT count as extraction success or satisfy reconciliation.
+5. **PROVENANCE (required):** every accepted field carries `{value, raw_text, bbox, source_boxes, confidence, rule, observed:true/false, candidates[]}`.
 
-Also produce **classic OCR metrics** for the final report (see Deliverables): **transcribe a held-out sample of pages with your own vision** (Read the rendered PNGs; codex as backup) to build **pseudo-ground-truth**, then compute **CER, WER, and numeric-field exact-match** of your pipeline vs that. Plus throughput (pages/min) and peak RAM.
+PAGE-OK reconcile rate stays as a fast **diagnostic/guardrail**, never the optimization target.
 
-## The LOOP (run this until stop criteria)
+---
+
+## PHASE 0 — FOUNDATIONS (mandatory BEFORE any optimization loop)
+Codex review = **no-go until these exist.** Do them first, commit each.
+
+**0a. Full accounting graph** (replace the 4 naive checks in `reconcile.py`):
+- `sub_total` = Σ upper charge rows *with signs*: demand-normal, demand-penal, energy, excess-energy, duty, fuel-surcharge, FPPCA (may be multi-component incl. negatives), TOD charges, TOD incentive(−).
+- `total` = `sub_total` + customer charges + every nonzero pre-total lower-panel row (grid support, wheeling, transmission, RKVAH HYDEL/WIND, open-access cross-subsidy, ACD, late payment, interest-on-ED, penal interest, transformer hire, difference-voltage, load-factor-incentive(−), MATS dev, …) with label-driven signs.
+- `net_bill` = `total` + TCS/TCSS-F + rebates + subsidies + pooled-cost-adj + NetIcd + other-credit + export + loss/gain.
+- `net_payable` = `net_bill` + previous-year arrears + current-year arrears (signed).
+- Each check reports: expected, observed, delta, rows-included, rows-missing, source-boxes. Tolerance = paise-level (0.01) for printed rows; explicit rounding only where the bill rounds.
+- Add **row-level** checks: for each billing row, `rate × quantity ≈ amount` (printed). This is what actually catches swapped/duplicate/same-sum false passes.
+
+**0b. Provenance-carrying extractor output** — change `extract()` from `field→value` to `field→{value, raw_text, bbox, source_boxes, confidence, rule, observed, candidates}`. Reconciliation passes ONLY on `observed` values with source boxes. Ambiguous (multiple candidates satisfy geometry/arithmetic) → FAIL the field, don't silently pick.
+
+**0c. Vision pseudo-GT set** (use YOUR OWN eyes — free, no external API): `python render.py <p>` → Read the PNG → hand-transcribe fields → save `samples/gt/p<n>.json`. Build GT for the hard/representative pages codex identified: **8 (clean), 16 (arrears), 32 (grid+pooled, negative payable), 48 (NetIcd), 128 (large arrears), 160 (negative FPPCA), 256 (2026 drift), 262 (sparse alt template), 1 or 144 (non-bill)**. Label money + dates/IDs + core consumption fields. Codex already transcribed many key values in CODEX_REVIEW.md §Evidence — use as a starting reference but confirm with your own read.
+
+**0d. Enforced dev/test/coverage evaluator** — add `TEST_BILLS` (held-out, NOT in dev), and `eval.py --split {dev,test,full,all}`. Denominator includes expected bill pages + skipped/unknown pages. Log field-level metrics, missing-field counts, coverage, and false-pass risk — not just page-level. Add unit tests for the accounting graph using pages 8/16/32/48/128/160/256.
+
+Only after 0a–0d are green do you enter the optimization loop.
+
+---
+
+## PHASE 1 — OPTIMIZATION LOOP
 ```
-while not (plateaued AND codex_says_optimal):
-    1. Pick the highest-leverage failing check (read eval.py output + inspect boxes).
-    2. Form a hypothesis. If it's a known-type problem, SEARCH ONLINE first
-       (WebSearch/Exa/HF) — electricity-bill OCR, invoice KV extraction,
-       PP-Structure table recognition, ICDAR/DocVQA, RapidOCR params, deskew.
-       Trace the SPECIFIC failure; do not guess.
-    3. Implement ONE change (a lever below). Keep diffs surgical.
-    4. Run `python eval.py <approach_name>`  (fast, cached dev set).
-    5. If PAGE-OK improved and nothing regressed -> snapshot to best/, update RESULTS.md.
-       Else revert. Always keep best/ green.
-    6. Every few wins: verify on the HELD-OUT test bills (not dev) to check you're
-       not overfitting rules to dev pages. Use codex vision to spot-check 2-3 pages.
-    7. Log metrics every iteration (leaderboard.jsonl auto-appends).
+while not (plateaued on dev AND test AND both self-review + codex say optimal):
+    1. Pick the lowest field-level-accuracy field / highest-value failure.
+    2. If known-type problem, SEARCH ONLINE first (invoice KV extraction, PP-Structure
+       table recognition, RapidOCR params, deskew) — trace the SPECIFIC symptom, don't guess.
+    3. Implement ONE surgical change (lever below).
+    4. Run eval on dev; if win + no regression, validate on TEST; spot-check 2-3 pages with
+       your own vision. Keep -> snapshot best/ + scoped git commit. Else revert.
+    5. Log everything.
 ```
-Fast inner loop = cached dev pages only. When you change OCR/preprocessing (not just binding), re-OCR affected pages with a new cache `variant=` so you can compare. Expand OCR cache to more bill pages as confidence grows; run the FULL 262 only for final metrics.
+Inner loop = cached dev pages (no OCR). Changing OCR/preprocessing → re-OCR into a new `variant=` cache to compare. Run full 262 only for final metrics.
 
-**Dev/test discipline:** tune on `DEV_BILLS` (in common.py). Hold out a separate set for validation, e.g. `TEST_BILLS = [24,40,56,72,104,136,168,200,232,248]` — OCR these once, never tune against them, report final numbers on them.
+**Levers (in order of expected leverage):**
+- **A. Deterministic TABLE PARSER (not isolated lookups):** normalize coords by real image W/H (not `max(xmax)`); register to anchors (header, bill-month line, money column); join split boxes into line tokens; detect money column; parse billing rows into `(label,rate,qty,unit,amount)` and lower rows into `(label,signed_amount)`; derive fields from records. Exact/anchored label match (kill `Total` vs `Total Consumption`); version-tolerant label aliases for drift.
+- **B. Preprocessing:** deskew, orientation detect, binarize, upscale small-font rows, 300–400 DPI render vs embedded JPEG — compare.
+- **C. Engine cross-check:** keep RapidOCR as champion; use Tesseract/PaddleOCR as a **cross-checker** on disputed money rows (agree→trust, differ→flag). Don't burn the night installing heavy engines before the parser is strong. PP-Structure/Docling only as a separate alternate branch, strictly compared.
+- **D. Speed:** `onnxruntime-directml`/OpenVINO on the Arc iGPU; parallelize across cores. Only if accuracy holds.
+- **E. Non-numeric fields:** service no., billing month, bill/due dates, consumer/category/location, CMD/RMD, KWH/KVAH/KVA totals, PF, LF%, meter readings. Needed to support the "structured fields" claim.
 
-## LEVERS to explore (hyperparameters + approaches — this is the search space)
-**A. Binding logic (start here — biggest, cheapest wins):**
-- Exact/anchored label matching; join adjacent boxes for multi-word labels; split glued `label+value`.
-- Column-aware extraction: detect header x-positions (`KWH/KVAH/KVA/PF/LF%`) and assign the consumption-row values to the right column. Same idea for the money column.
-- Template zones: since layout is fixed, calibrate approximate (x,y) regions per field from a few reconciling pages, then snap — but make it scale/offset-tolerant (align by an anchor like the "EASTERN POWER" header or page bounds).
-**B. Preprocessing (feed cleaner pixels):**
-- deskew, binarize (Otsu/adaptive), denoise, upscale small-font regions, try rendering the PDF page at 300–400 DPI vs using the embedded JPEG (compare which OCRs better). `ocrmypdf`/opencv.
-**C. OCR engine bake-off (cross-check + maybe upgrade):**
-- RapidOCR model variants/params (det_db params, rec model, use_angle_cls). Then benchmark **PaddleOCR / PP-StructureV3** (native table-structure → HTML grid), **Tesseract** (winget install; `--psm` tuning; strong when preprocessed), **docTR**, **EasyOCR**. Use a SECOND engine as a **cross-checker**: where two independent engines agree on a number, trust it; where they differ, flag. Cross-engine agreement is a second free metric.
-**D. Speed (enables more iterations):**
-- Try `onnxruntime-directml` or OpenVINO to run OCR on the **Arc 140T iGPU** (target: 15s → few s/page). Parallelize pages across CPU cores. Only pursue if it doesn't cost accuracy.
-**E. Table-structure models:** PP-StructureV3 / Docling TableFormer to recover the grid directly, then map cells → fields. Heavier; evaluate cost/benefit.
-
-## RESEARCH mandate
-Many of these problems are solved. Before hand-rolling, search: "PaddleOCR table structure recognition", "invoice key-value extraction OCR bounding boxes", "electricity bill OCR pipeline", "RapidOCR det parameters small text", "OpenVINO onnxruntime Arc iGPU". Trace the exact failing symptom to a known cause. Cite what you adopt in RESULTS.md.
-
-## GRADING & GROUND-TRUTH — use YOUR OWN free vision + reasoning (no external API)
-**You (the agent running this goal) ARE Claude Opus 4.8 with vision.** That is a free "eyes + brain" you can use for grading, ground-truth, adjudication, and review — it is NOT an external API and costs the pipeline nothing. Use it as the PRIMARY judge. Codex is a free SECOND opinion.
-
-**Hard rule:** self-vision/codex are for BUILD-TIME grading & review only. The **production pipeline must stay 100% local/offline** (RapidOCR/Paddle/Tesseract). Never make Claude-vision or codex a runtime dependency of the monthly extractor.
-
-- **Pseudo-ground-truth (primary):** `python render.py <p>` → PNG, then **Read the PNG yourself** and transcribe the fields/numbers by eye. Save to `samples/gt/p<n>.json`. Use these as ground truth to compute **CER / WER / numeric exact-match** for your pipeline. Build GT for the held-out TEST bills + a few outliers. Trust your own read over OCR when they conflict — but if unsure on a faint digit, zoom (render at higher scale) and/or ask codex to confirm.
-- **Adjudication:** when two OCR engines disagree on a number, Read the page image yourself and decide the truth. Codex = tie-breaker if you're uncertain.
-- **Diagnosis:** stuck >2 iterations on a check? Read the page PNG + your extracted fields + the OCR boxes and reason about what's mis-bound. This is often faster than blind rule-tuning.
-- **Final review (two independent gates):** when plateaued, (1) do your own critical self-review reading several pages against the pipeline output, AND (2) ask codex *"can this be more accurate or cheaper, locally? strongest remaining failure?"*. Treat the goal as done only when BOTH agree it's near-optimal. Record both verdicts.
-
-## STOP criteria
-Stop the primary approach when: PAGE-OK rate plateaus (no gain over several iterations across DEV **and** held-out TEST), per-field accuracy is high on the vision pseudo-GT sample, **and** BOTH your own critical self-review AND codex review say it can't be meaningfully improved locally. THEN: keep the champion safe in `best/` and **spawn ≥1 alternate approach** (e.g. PP-StructureV3 table-grid path, or a template-zone path) to try to beat the champion. Adopt an alternate only if it strictly wins. Repeat until alternates stop beating the champion.
+## GRADING & REVIEW — free vision + reasoning (build-time only)
+- **You ARE Claude Opus 4.8 with vision.** Read rendered PNGs yourself to build pseudo-GT, adjudicate cross-engine disputes, and diagnose mis-binds (often faster than blind rule-tuning). Trust your read over OCR; zoom (higher render scale) or ask codex if unsure.
+- **Codex** = independent second opinion / tie-breaker / final review.
+- Neither may enter the production runtime path.
 
 ## GUARDRAILS
-- **Git is initialized.** Commit after every accepted improvement (`git add -A && git commit -m "<approach>: PAGE-OK x/16 -> y/16"`). This is your rollback net — if a change wrecks the env or metric, `git reset --hard` to the last green commit. Never force-push; never delete history.
-- `ocr_lab/best/` = current champion, always runnable. Snapshot before risky changes.
-- Every eval auto-logs to `metrics/leaderboard.jsonl`. Keep `RESULTS.md` as the human-readable running log: what tried, metric delta, why kept/reverted, sources.
-- Version approaches by name (`baseline_v0`, `bind_v1_exactlabel`, `pp_structure_v1`, ...). Never overwrite history.
-- Don't break the working loop. Small surgical diffs. If an install wedges the env, back it out.
+- **Git = rollback net.** Commit each accepted win with a SCOPED add (`git add ocr_lab/<files>`, NOT `git add -A`; don't sweep in caches/GT/user files). Prefer `git revert`/checkout of specific files over blind `git reset --hard`.
+- `best/` = champion code + `best/MANIFEST.json` {git commit, approach, run command, dep versions, cache variant, dev/test/full metrics, pseudo-GT version, known failures}. Copying code alone is insufficient.
+- `metrics/leaderboard.jsonl` auto-logs; include commit hash + split + field metrics. `RESULTS.md` = human running log (hypothesis→delta→keep/revert→source).
+- Research must not block a known local fix or stall under restricted network. Time-box it.
+- Version approaches by name. Never overwrite history.
 
-## DELIVERABLES (produce `metrics/RESULTS.md` at the end)
-1. **Champion pipeline** in `best/`, one command to run on the full PDF.
-2. **Metrics table**: PAGE-OK reconcile rate (dev + held-out), per-check pass %, per-field accuracy, **CER / WER / numeric exact-match vs your vision pseudo-GT**, cross-engine agreement %, throughput (pages/min), peak RAM, coverage (% pages parsed).
-3. **Leaderboard** of every approach tried, ranked.
-4. **Two final verdicts**: your own self-review + codex ("can't do better locally" + strongest remaining weakness).
-5. **Alternate approaches** tried and whether they beat the champion.
-6. Short **"how others solve this"** notes with the sources you used.
+## STOP criteria (objective)
+Stop the primary approach when: field-level accuracy on DEV **and** held-out TEST plateaus over several iterations at a high level, coverage is complete, reconciliation rate (full graph) is high, **and BOTH** your own critical self-review **and** codex agree it can't be meaningfully improved locally. Record both verdicts + the strongest remaining weakness. THEN keep the champion safe and spawn ≥1 alternate (table-structure model path, or template-zone path) to try to beat it; adopt only on a strict win.
+
+## DELIVERABLES (`metrics/RESULTS.md`)
+1. Champion pipeline in `best/` + MANIFEST, one command to run on full PDF, emitting the **full 262-page extracted table (CSV/JSON) with provenance** — the artifact the future dashboard/RAG will consume.
+2. **Metrics table:** field-level exact-match (money/consumption/dates/IDs/text, dev+test), accounting-reconcile rate (full graph), coverage %, CER/WER/numeric-exact vs vision pseudo-GT, cross-engine agreement %, throughput (pages/min), peak RAM.
+3. Ranked leaderboard of all approaches.
+4. Two final verdicts (self-review + codex) + strongest remaining weakness.
+5. Alternate approaches tried and whether they beat the champion.
+6. "How others solve this" notes + sources.
 
 ## Run
 ```
 cd ocr_lab
-python eval.py <approach_name>      # fast inner loop (cached)
-python render.py <page>             # PNG for codex vision grading
-# expand OCR: common.ocr(page, variant="deskew", preprocess=fn)
+python eval.py --split dev            # fast inner loop (cached)
+python render.py <page>               # PNG for your vision grading
 ```
-Begin by fixing the three known baseline binding bugs, re-run eval, and climb from there. Don't give up.
+Do Phase 0 first (metric+provenance+pseudo-GT+splits). Then climb. Don't give up.
