@@ -366,20 +366,68 @@ def nonmoney_fields(boxes):
     if not m:
         m, b = _find(boxes, r"\b(II?A?\([iv]+\))")
     add("category", m, b, "regex:category")
-    # Total Consumption row: KWH KVAH KVA PF (numbers to the right of the label)
-    for row in rows(boxes):
-        row = sorted(row, key=lambda x: x[1])
-        joined = norm("".join(x[3] for x in row))
-        if joined.startswith("totalconsumption"):
-            nums = [(x, parse_num(x[3])) for x in row]
-            nums = [(x, v) for x, (v, _) in nums if v is not None]
-            keys = ["cons_kwh", "cons_kvah", "cons_kva", "cons_pf"]
-            for (x, v), k in zip(nums, keys):
-                out[k] = {"value": v, "raw_text": x[3], "bbox": [x[0], x[1], x[2]],
-                          "source_boxes": [list(x)], "confidence": None,
-                          "rule": "row:total_consumption", "observed": True,
-                          "candidates": []}
-            break
+    out.update(consumption_fields(boxes))
+    return out
+
+def consumption_fields(boxes):
+    """Total-Consumption row values by column (KWH/KVAH/KVA/PF/LF%).
+
+    Table shear makes the 'Total Consumption' label unreliable as a row anchor.
+    Instead we key off the Multiplying-Factor row — the only value row whose
+    KWH==KVAH==KVA (e.g. 1/1/1 or 1000/1000/1000) — and take the value row
+    immediately below it as Total Consumption."""
+    out = {}
+    cols = {}
+    for b in boxes:
+        t = norm(b[3])
+        cx = (b[1] + b[2]) / 2
+        for key, ok in (("cons_kwh", t == "kwh"), ("cons_kvah", t == "kvah"),
+                        ("cons_kva", t == "kva"), ("cons_pf", t == "pf"),
+                        ("cons_lf", t.startswith("lf"))):
+            if ok and key not in cols:
+                cols[key] = cx
+    if not all(k in cols for k in ("cons_kwh", "cons_kvah", "cons_kva")):
+        return out
+
+    def col_of(b):
+        c = (b[1] + b[2]) / 2
+        best = min(cols, key=lambda k: abs(cols[k] - c))
+        return best if abs(cols[best] - c) <= 60 else None
+
+    # cluster numeric boxes that fall in a known column into value rows
+    vals = [(b, col_of(b)) for b in boxes if parse_num(b[3])[0] is not None]
+    vals = [(b, c) for b, c in vals if c is not None]
+    vals.sort(key=lambda t: t[0][0])
+    rows_, cur, y0 = [], [], None
+    for b, c in vals:
+        if y0 is None or abs(b[0] - y0) <= 12:
+            cur.append((b, c)); y0 = b[0] if y0 is None else (y0 + b[0]) / 2
+        else:
+            rows_.append(cur); cur = [(b, c)]; y0 = b[0]
+    if cur:
+        rows_.append(cur)
+
+    def rowmap(row):
+        d = {}
+        for b, c in row:
+            d.setdefault(c, b)
+        return d
+
+    # Multiplying-Factor row := KWH==KVAH==KVA present and equal
+    mf_i = None
+    for i, row in enumerate(rows_):
+        d = rowmap(row)
+        vs = [parse_num(d[k][3])[0] for k in ("cons_kwh", "cons_kvah", "cons_kva") if k in d]
+        if len(vs) == 3 and max(vs) - min(vs) < 1e-6:
+            mf_i = i
+    if mf_i is None or mf_i + 1 >= len(rows_):
+        return out
+    tc = rowmap(rows_[mf_i + 1])                      # Total Consumption = next row
+    for key, b in tc.items():
+        v, _ = parse_num(b[3])
+        out[key] = {"value": v, "raw_text": b[3], "bbox": [b[0], b[1], b[2]],
+                    "source_boxes": [list(b)], "confidence": None,
+                    "rule": "row_after_mf:total_consumption", "observed": True, "candidates": []}
     return out
 
 # ---- top-level API ---------------------------------------------------------

@@ -55,9 +55,11 @@ def rows(boxes, band=16):
 # an amount box VALUE ends with its number (allow trailing ')' or spaces).
 # This rejects full-width prose (NOTE line), label-only rows ('25%Rebate...'),
 # and split labels ('NetIcdAmt...(0.00-') that merely contain a digit.
-_ENDS_NUM = re.compile(r"-?\d[\d,]*\.?\d*\)?\s*$")
+_ENDS_NUM = re.compile(r"-?\d[\d,]*\.?\d*\)?[A-Za-z]{0,2}\s*$")  # allow trailing OCR noise ('364356.50M')
+# date/label boxes that merely end in a year ('...01-Apr-2024') are NOT amounts
+_DATE_LABEL = re.compile(r"arrears|before|after|dated|\d{1,2}-[A-Za-z]{3}-\d", re.I)
 
-def money_column(boxes, frac=0.90, max_w_frac=0.25):
+def money_column(boxes, frac=0.90, max_w_frac=0.40):
     """Rightmost right-aligned amount column. Returns money_boxes.
 
     money box := numeric, right-aligned (xmax >= frac*page_right), value-terminal
@@ -77,6 +79,8 @@ def money_column(boxes, frac=0.90, max_w_frac=0.25):
         if (b[2] - b[1]) >= max_w_frac * max_x:
             continue
         if not _ENDS_NUM.search(b[3]):
+            continue
+        if _DATE_LABEL.search(b[3]):        # arrears/date label ending in a year, not an amount
             continue
         money.append(b)
     return money
@@ -215,26 +219,37 @@ def _assign(amounts, labels, delta):
     return pairs, residual
 
 def bind_upper(boxes, upper_amounts, y_lo, y_hi):
-    """Shear-tolerant binding of the upper charge table.
-    Grid-search the label->amount vertical offset delta; pick min-residual."""
+    """Bind the upper charge table amounts to their labels.
+
+    The charge rows always appear in a FIXED template order, top-to-bottom. When
+    the amount count equals the label count, rank alignment (i-th amount <-> i-th
+    label) is exact and shear-proof — it beats visual y-matching, which the
+    per-page vertical shear otherwise fools (e.g. p256 FPPCA value sits at the
+    True-up row's y). If counts differ (dropped/extra OCR box), fall back to a
+    grid-searched vertical-offset greedy match.
+    """
     labels = _upper_labels(boxes, y_lo, y_hi)
     if not labels or not upper_amounts:
         return []
     amounts = sorted(upper_amounts, key=lambda t: t[0])
-    best = None
-    for d10 in range(-200, 501, 10):        # delta in [-20, 50], 1px steps via /10
-        delta = d10 / 10.0
-        pairs, res = _assign(amounts, labels, delta)
-        # prefer more amounts matched, then lower residual, then |delta| small
-        score = (res + abs(delta) * 0.01)
-        if best is None or score < best[0]:
-            best = (score, delta, pairs)
-    _, delta, pairs = best
+    if len(amounts) == len(labels):
+        pairs = [(mb, lab) for (_, mb), lab in zip(amounts, labels)]
+        rule_tag = "rank"
+    else:
+        best = None
+        for d10 in range(-300, 501, 10):        # delta in [-30, 50]
+            delta = d10 / 10.0
+            pr, res = _assign(amounts, labels, delta)
+            score = res + abs(delta) * 0.01
+            if best is None or score < best[0]:
+                best = (score, delta, pr)
+        _, delta, pairs = best
+        pairs = [(mb, lab) for mb, lab in pairs]
+        rule_tag = f"shear:d={delta:.0f}"
     recs = []
     for mb, lab in pairs:
         _, field, sign, lbox = lab
-        left = [lbox]
-        r = _rec(field, "sub", sign, mb, lbox[3], left, f"upper_shear:{field}:d={delta:.0f}")
+        r = _rec(field, "sub", sign, mb, lbox[3], [lbox], f"upper_{rule_tag}:{field}")
         if r:
             recs.append(r)
     return recs
@@ -255,10 +270,13 @@ def build_records(boxes, band=16):
             y_sub = b[0]; break
     if y_sub is None:
         y_sub = max(b[0] for b in money)     # degrade: treat all as lower
-    # top of the charge table = the Demand Charges Normal Rate label
-    y_lo = min((b[0] for b in boxes if "demandchargesnormal" in norm(b[3])), default=0) - 12
-    upper = [(mb[0], mb) for mb in money if y_lo < mb[0] < y_sub - 2]
-    lower = [mb for mb in money if mb[0] >= y_sub - 2]
+    # top of charge table = Demand Charges Normal Rate label. Wide margin: the
+    # demand amount can sit ~30px ABOVE its label under negative shear (p48/p256).
+    y_lo = min((b[0] for b in boxes if "demandchargesnormal" in norm(b[3])), default=0) - 40
+    # margin keeps the Sub Total value box (same row as its label) out of the
+    # upper table, where it would otherwise be mis-bound as a charge amount.
+    upper = [(mb[0], mb) for mb in money if y_lo < mb[0] < y_sub - 12]
+    lower = [mb for mb in money if mb[0] >= y_sub - 12]
 
     recs = []
     recs += bind_upper(boxes, upper, y_lo, y_sub)
@@ -348,20 +366,68 @@ def nonmoney_fields(boxes):
     if not m:
         m, b = _find(boxes, r"\b(II?A?\([iv]+\))")
     add("category", m, b, "regex:category")
-    # Total Consumption row: KWH KVAH KVA PF (numbers to the right of the label)
-    for row in rows(boxes):
-        row = sorted(row, key=lambda x: x[1])
-        joined = norm("".join(x[3] for x in row))
-        if joined.startswith("totalconsumption"):
-            nums = [(x, parse_num(x[3])) for x in row]
-            nums = [(x, v) for x, (v, _) in nums if v is not None]
-            keys = ["cons_kwh", "cons_kvah", "cons_kva", "cons_pf"]
-            for (x, v), k in zip(nums, keys):
-                out[k] = {"value": v, "raw_text": x[3], "bbox": [x[0], x[1], x[2]],
-                          "source_boxes": [list(x)], "confidence": None,
-                          "rule": "row:total_consumption", "observed": True,
-                          "candidates": []}
-            break
+    out.update(consumption_fields(boxes))
+    return out
+
+def consumption_fields(boxes):
+    """Total-Consumption row values by column (KWH/KVAH/KVA/PF/LF%).
+
+    Table shear makes the 'Total Consumption' label unreliable as a row anchor.
+    Instead we key off the Multiplying-Factor row — the only value row whose
+    KWH==KVAH==KVA (e.g. 1/1/1 or 1000/1000/1000) — and take the value row
+    immediately below it as Total Consumption."""
+    out = {}
+    cols = {}
+    for b in boxes:
+        t = norm(b[3])
+        cx = (b[1] + b[2]) / 2
+        for key, ok in (("cons_kwh", t == "kwh"), ("cons_kvah", t == "kvah"),
+                        ("cons_kva", t == "kva"), ("cons_pf", t == "pf"),
+                        ("cons_lf", t.startswith("lf"))):
+            if ok and key not in cols:
+                cols[key] = cx
+    if not all(k in cols for k in ("cons_kwh", "cons_kvah", "cons_kva")):
+        return out
+
+    def col_of(b):
+        c = (b[1] + b[2]) / 2
+        best = min(cols, key=lambda k: abs(cols[k] - c))
+        return best if abs(cols[best] - c) <= 60 else None
+
+    # cluster numeric boxes that fall in a known column into value rows
+    vals = [(b, col_of(b)) for b in boxes if parse_num(b[3])[0] is not None]
+    vals = [(b, c) for b, c in vals if c is not None]
+    vals.sort(key=lambda t: t[0][0])
+    rows_, cur, y0 = [], [], None
+    for b, c in vals:
+        if y0 is None or abs(b[0] - y0) <= 12:
+            cur.append((b, c)); y0 = b[0] if y0 is None else (y0 + b[0]) / 2
+        else:
+            rows_.append(cur); cur = [(b, c)]; y0 = b[0]
+    if cur:
+        rows_.append(cur)
+
+    def rowmap(row):
+        d = {}
+        for b, c in row:
+            d.setdefault(c, b)
+        return d
+
+    # Multiplying-Factor row := KWH==KVAH==KVA present and equal
+    mf_i = None
+    for i, row in enumerate(rows_):
+        d = rowmap(row)
+        vs = [parse_num(d[k][3])[0] for k in ("cons_kwh", "cons_kvah", "cons_kva") if k in d]
+        if len(vs) == 3 and max(vs) - min(vs) < 1e-6:
+            mf_i = i
+    if mf_i is None or mf_i + 1 >= len(rows_):
+        return out
+    tc = rowmap(rows_[mf_i + 1])                      # Total Consumption = next row
+    for key, b in tc.items():
+        v, _ = parse_num(b[3])
+        out[key] = {"value": v, "raw_text": b[3], "bbox": [b[0], b[1], b[2]],
+                    "source_boxes": [list(b)], "confidence": None,
+                    "rule": "row_after_mf:total_consumption", "observed": True, "candidates": []}
     return out
 
 # ---- top-level API ---------------------------------------------------------
