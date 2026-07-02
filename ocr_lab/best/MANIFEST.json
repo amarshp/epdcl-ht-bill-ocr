@@ -1,0 +1,26 @@
+{
+  "approach": "v1_shear_parser",
+  "git_commit": "8357e4d",
+  "run": "python eval.py --gt --split dev",
+  "deps": "rapidocr-onnxruntime, pypdf, PIL, opencv-python, numpy, onnxruntime (CPU)",
+  "cache_variant": "base",
+  "metrics": {
+    "gt_field_exact_dev": "80.0% (148/185)",
+    "money": "85%",
+    "consumption": "43%",
+    "dates": "95%",
+    "ids": "86%",
+    "reconcile_chain_ok_dev": "10/16",
+    "sub_total": "100%",
+    "total": "75%",
+    "net_bill": "73%",
+    "net_payable": "62%"
+  },
+  "gt_version": "frozen 9-page vision GT (committed)",
+  "known_failures": [
+    "p48/p256 shear off-by-one",
+    "consumption Total-Consumption row mis-pick",
+    "p160 arrears OCR garbled",
+    "p262 sparse + p144 statement out-of-template"
+  ]
+}
