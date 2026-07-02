@@ -297,6 +297,36 @@ def build_records(boxes, band=16):
         r = _rec(field, section, sign, mb, label_text, left, rule)
         if r:
             recs.append(r)
+    recs = _fix_arrears(recs, lower)
+    return recs
+
+def _fix_arrears(recs, lower_money):
+    """Re-bind arrears by geometry: the prev/current arrears value boxes are the
+    money boxes strictly BETWEEN the Net Bill and Net Payable value rows, top->down
+    (prev then current). Robust to the offset that mis-binds them to labels."""
+    nb = next((r for r in recs if r["field"] == "net_bill"), None)
+    npay = next((r for r in recs if r["field"] == "net_payable"), None)
+    if not nb or not npay:
+        return recs
+    y_nb, y_np = nb["amount_bbox"][0], npay["amount_bbox"][0]
+    lo, hi = min(y_nb, y_np), max(y_nb, y_np)
+    used = {id(r["source_boxes"][-1]) for r in recs}   # boxes already consumed as totals
+    between = sorted([mb for mb in lower_money if lo + 2 < mb[0] < hi - 2], key=lambda b: b[0])
+    if not between:
+        return recs
+    recs = [r for r in recs if r["field"] not in ("arrears_prev", "arrears_curr")]
+    fields_order = ["arrears_prev", "arrears_curr"]
+    # if only one value box, it is the current-year arrears (prev is usually 0/absent)
+    picks = between if len(between) >= 2 else [None] + between
+    for fld, mb in zip(fields_order, picks[:2]):
+        if mb is None:
+            continue
+        v, raw = parse_num(mb[3])
+        if v is None:
+            continue
+        recs.append({"field": fld, "section": "pay", "value": signed_value(v, raw, 1),
+                     "raw_text": mb[3], "amount_bbox": [mb[0], mb[1], mb[2]],
+                     "label_text": fld, "source_boxes": [list(mb)], "rule": f"arrears_geom:{fld}"})
     return recs
 
 # ---- field dict with provenance -------------------------------------------
@@ -353,6 +383,8 @@ def nonmoney_fields(boxes):
     m, b = _find(boxes, r"month\s*of[:\s]*[:：]?\s*(\d{2}/\d{4})", re.I)
     if not m:
         m, b = _find(boxes, r"[:：]\s*(\d{2}/\d{4})")
+    if not m:
+        m, b = _find(boxes, r"^\s*(\d{2}/\d{4})\s*$")     # bare '02/2024' box (split label)
     add("bill_month", m, b, "regex:month")
     m, b = _find(boxes, r"[Dd]ated[:\s]*([0-3]?\d-[A-Za-z0-9]{2,}-\d{4})")
     add("bill_date", m, b, "regex:dated")
@@ -362,10 +394,17 @@ def nonmoney_fields(boxes):
     add("service_no", m, b, "regex:serviceno")
     m, b = _find(boxes, r"(APEPDC\d+)")
     add("van_id", m, b, "regex:vanid")
-    m, b = _find(boxes, r"\b(I{1,3}[ABC]?\s?\([iv]+\))", 0)       # category e.g. IIA(i)
-    if not m:
-        m, b = _find(boxes, r"\b(II?A?\([iv]+\))")
-    add("category", m, b, "regex:category")
+    # category: value box on the 'Category' label's row (handles IIA(i), IB, IIIA)
+    catlab = next((x for x in boxes if norm(x[3]) == "category"), None)
+    if catlab is not None:
+        rowcands = [x for x in boxes if x[1] > catlab[2] and abs(x[0] - catlab[0]) <= 20
+                    and re.match(r"^I{1,3}[ABC]?(\([ivx]+\))?$", x[3].strip().replace(" ", ""))]
+        if rowcands:
+            cb = min(rowcands, key=lambda x: x[1])
+            add("category", re.match(r"(.*)", cb[3].strip()), cb, "row:category")
+    if "category" not in out:
+        m, b = _find(boxes, r"\b(I{1,3}[ABC]?\s?\([iv]+\))")
+        add("category", m, b, "regex:category")
     out.update(consumption_fields(boxes))
     return out
 
