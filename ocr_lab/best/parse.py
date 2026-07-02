@@ -136,6 +136,8 @@ CATALOG = [
     ("total",          "val", +1, ["total"]),   # generic 'total' LAST
 ]
 
+_NETBILL_FUZZY = re.compile(r"netb\w{0,3}am\w{0,2}t")   # 'Net Bll Amount' OCR typo
+
 def classify(label):
     n = norm(label)
     if not n:
@@ -144,6 +146,8 @@ def classify(label):
         for k in keys:
             if k in n:
                 return field, section, sign
+    if _NETBILL_FUZZY.search(n):
+        return "net_bill", "val", +1
     return None
 
 # ---- record building -------------------------------------------------------
@@ -182,17 +186,58 @@ def _rec(field, section, sign, mb, label_text, left, rule):
         "rule": rule,
     }
 
-def _upper_labels(boxes, y_lo, y_hi):
-    """Charge labels (section 'sub') between y_lo and y_hi, sorted top->down."""
+# canonical normalized labels for the 10 upper charge rows (template order)
+_SUB_CANON = [
+    ("demand_normal", +1, "demandchargesnormalrate"),
+    ("demand_penal",  +1, "demandchargespenalrate"),
+    ("energy_charges",+1, "energychargesrateallunits"),
+    ("excess_energy", +1, "excessenergychargesrate"),
+    ("elec_duty",     +1, "electricitydutycharges"),
+    ("fuel_surcharge",+1, "fuelsurchargeadjustment"),
+    ("trueup",        +1, "trueupcharge"),
+    ("fppca",         +1, "fppcacharge"),
+    ("tod_charges",   +1, "todcharges"),
+    ("tod_incentive", -1, "todincentive"),
+]
+# non-charge rows that resemble charge labels -> must NOT fuzzy-match to one
+_SUB_DECOYS = ["colonychargesrates", "landfchargesrate", "lfchargesrate",
+               "energychargesincludefuelcostadj", "supplyername", "maincomsumption",
+               "monthlyminconsumption", "totalconsumption"]
+
+def _sub_fuzzy(text):
+    """OCR-noise-tolerant charge-label match ('Dcmand','Exccss'). Rejects decoys."""
+    from difflib import SequenceMatcher
+    n = norm(text)
+    if len(n) < 6:
+        return None
+    def r(a, b):
+        return SequenceMatcher(None, a[:len(b) + 4], b).ratio()
+    field, sign, canon = max(_SUB_CANON, key=lambda c: r(n, c[2]))
+    best = r(n, canon)
+    if best < 0.84:
+        return None
+    if any(r(n, d) >= best for d in _SUB_DECOYS):
+        return None
+    return field, sign
+
+def _upper_labels(boxes, y_lo, y_hi, fuzzy=False):
+    """Charge labels (section 'sub') between y_lo and y_hi, sorted top->down.
+    fuzzy=True adds OCR-noise-tolerant matches for boxes exact matching missed."""
     max_x = max(x[2] for x in boxes)
-    out = []
+    out, seen = [], set()
     for b in boxes:
-        if not (y_lo <= b[0] < y_hi):
+        if not (y_lo <= b[0] < y_hi) or b[2] >= 0.85 * max_x:
             continue
         hit = classify(_nonnum_prefix(b[3]) or norm(b[3]))
-        # keep charge labels; skip right-aligned money-column boxes
-        if hit and hit[1] == "sub" and b[2] < 0.85 * max_x:
-            out.append((b[0], hit[0], hit[2], b))
+        if hit and hit[1] == "sub":
+            out.append((b[0], hit[0], hit[2], b)); seen.add(hit[0])
+    if fuzzy:
+        for b in boxes:
+            if not (y_lo <= b[0] < y_hi) or b[2] >= 0.85 * max_x:
+                continue
+            fh = _sub_fuzzy(b[3])
+            if fh and fh[0] not in seen:
+                out.append((b[0], fh[0], fh[1], b)); seen.add(fh[0])
     out.sort(key=lambda t: t[0])
     return out
 
@@ -229,9 +274,16 @@ def bind_upper(boxes, upper_amounts, y_lo, y_hi):
     grid-searched vertical-offset greedy match.
     """
     labels = _upper_labels(boxes, y_lo, y_hi)
+    amounts = sorted(upper_amounts, key=lambda t: t[0])
+    # GATED fuzzy recovery: only when exact labels are FEWER than amounts (OCR
+    # dropped a charge label). Never runs when exact already count-matches, so the
+    # proven dev path is untouched.
+    if len(labels) < len(amounts):
+        fl = _upper_labels(boxes, y_lo, y_hi, fuzzy=True)
+        if len(labels) < len(fl) <= len(amounts):
+            labels = fl
     if not labels or not upper_amounts:
         return []
-    amounts = sorted(upper_amounts, key=lambda t: t[0])
     if len(amounts) == len(labels):
         pairs = [(mb, lab) for (_, mb), lab in zip(amounts, labels)]
         rule_tag = "rank"
@@ -297,6 +349,64 @@ def build_records(boxes, band=16):
         r = _rec(field, section, sign, mb, label_text, left, rule)
         if r:
             recs.append(r)
+    recs = _fix_arrears(recs, lower, boxes)
+    return recs
+
+def _fix_arrears(recs, lower_money, all_boxes):
+    """Re-bind arrears by geometry: the prev/current arrears value boxes are the
+    money boxes strictly BETWEEN the Net Bill and Net Payable value rows, top->down
+    (prev then current). Robust to the offset that mis-binds them to labels."""
+    nb = next((r for r in recs if r["field"] == "net_bill"), None)
+    npay = next((r for r in recs if r["field"] == "net_payable"), None)
+    if not nb or not npay:
+        return recs
+    y_nb, y_np = nb["amount_bbox"][0], npay["amount_bbox"][0]
+    lo, hi = min(y_nb, y_np), max(y_nb, y_np)
+    used = {id(r["source_boxes"][-1]) for r in recs}   # boxes already consumed as totals
+    between = sorted([mb for mb in lower_money if lo + 2 < mb[0] < hi - 2], key=lambda b: b[0])
+    if not between:
+        return recs
+    recs = [r for r in recs if r["field"] not in ("arrears_prev", "arrears_curr")]
+    if len(between) >= 2:
+        picks = between
+    elif between:
+        v0 = parse_num(between[0][3])[0]
+        picks = [between[0], None] if (v0 is not None and abs(v0) < 0.005) else [None, between[0]]
+    else:
+        picks = [None, None]
+    for fld, mb in zip(["arrears_prev", "arrears_curr"], picks[:2]):
+        if mb is not None:
+            v, raw = parse_num(mb[3])
+            if v is not None:
+                recs.append({"field": fld, "section": "pay", "value": signed_value(v, raw, 1),
+                             "raw_text": mb[3], "amount_bbox": [mb[0], mb[1], mb[2]],
+                             "label_text": fld, "source_boxes": [list(mb)],
+                             "rule": f"arrears_geom:{fld}"})
+    recs = _arrears_from_labels(recs, all_boxes)
+    return recs
+
+_DATE_STRIP = re.compile(r"\d{1,2}-[A-Za-z]{3}-\d{4}")
+
+def _arrears_from_labels(recs, all_boxes):
+    """Some bills glue the arrears amount into its label box
+    ('(CurrentYears)Arrears after01-Apr-2023 201909.00'). If a slot is still empty,
+    strip the date and read the trailing amount from the label box itself."""
+    if all_boxes is None:
+        return recs
+    have = {r["field"] for r in recs}
+    for fld, key in (("arrears_prev", "arrearsbefore"), ("arrears_curr", "arrearsafter")):
+        if fld in have:
+            continue
+        for b in all_boxes:
+            if key in norm(b[3]):
+                rest = _DATE_STRIP.sub("", b[3])
+                v, raw = parse_num(rest)
+                if v is not None and abs(v) > 4:      # skip stray year fragments
+                    recs.append({"field": fld, "section": "pay",
+                                 "value": signed_value(v, raw, 1), "raw_text": b[3],
+                                 "amount_bbox": [b[0], b[1], b[2]], "label_text": fld,
+                                 "source_boxes": [list(b)], "rule": f"arrears_label:{fld}"})
+                break
     return recs
 
 # ---- field dict with provenance -------------------------------------------
@@ -353,6 +463,8 @@ def nonmoney_fields(boxes):
     m, b = _find(boxes, r"month\s*of[:\s]*[:：]?\s*(\d{2}/\d{4})", re.I)
     if not m:
         m, b = _find(boxes, r"[:：]\s*(\d{2}/\d{4})")
+    if not m:
+        m, b = _find(boxes, r"^\s*(\d{2}/\d{4})\s*$")     # bare '02/2024' box (split label)
     add("bill_month", m, b, "regex:month")
     m, b = _find(boxes, r"[Dd]ated[:\s]*([0-3]?\d-[A-Za-z0-9]{2,}-\d{4})")
     add("bill_date", m, b, "regex:dated")
@@ -362,10 +474,17 @@ def nonmoney_fields(boxes):
     add("service_no", m, b, "regex:serviceno")
     m, b = _find(boxes, r"(APEPDC\d+)")
     add("van_id", m, b, "regex:vanid")
-    m, b = _find(boxes, r"\b(I{1,3}[ABC]?\s?\([iv]+\))", 0)       # category e.g. IIA(i)
-    if not m:
-        m, b = _find(boxes, r"\b(II?A?\([iv]+\))")
-    add("category", m, b, "regex:category")
+    # category: value box on the 'Category' label's row (handles IIA(i), IB, IIIA)
+    catlab = next((x for x in boxes if norm(x[3]) == "category"), None)
+    if catlab is not None:
+        rowcands = [x for x in boxes if x[1] > catlab[2] and abs(x[0] - catlab[0]) <= 20
+                    and re.match(r"^I{1,3}[ABC]?(\([ivx]+\))?$", x[3].strip().replace(" ", ""), re.I)]
+        if rowcands:
+            cb = min(rowcands, key=lambda x: x[1])
+            add("category", re.match(r"(.*)", cb[3].strip()), cb, "row:category")
+    if "category" not in out:
+        m, b = _find(boxes, r"\b(I{1,3}[ABC]?\s?\([iv]+\))")
+        add("category", m, b, "regex:category")
     out.update(consumption_fields(boxes))
     return out
 
