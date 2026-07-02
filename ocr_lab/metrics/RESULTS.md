@@ -58,6 +58,21 @@ Alternate: sparse.py handles the p262 sparse template (9/9 fields) as a separate
 - **p160** arrears value physically overwritten by anti-bribery watermark → unreadable by any OCR.
 - **p262** sparse alt template + **p144** statement page: out-of-HT-template (separate class; counted vs coverage).
 
+## How others solve this (prior art) + why our choice
+- **Cloud KV extractors** (AWS Textract AnalyzeExpense, Azure Doc Intelligence prebuilt-invoice,
+  Google Doc AI) — highest accuracy, but violate the hard 100%-local/offline constraint. Excluded.
+- **Layout LLMs / VLMs** (Donut, LayoutLMv3, Qwen2-VL, docTR+LLM) — strong on unseen layouts but
+  heavy, non-deterministic, and (for VLMs) effectively cloud/GPU. Not a deterministic runtime for
+  exact money fields. Our build-time vision GT is a bounded, frozen use of a VLM (grading only).
+- **PP-Structure / Docling table recognition** — good generic tables, but this is ONE fixed template
+  with heavy vertical shear; a template-aware deterministic binder is more accurate + cheaper here.
+- **Chosen: RapidOCR (CPU ONNX) + deterministic template binder.** Recognition is near-perfect
+  already (numbers verbatim); the hard part was BINDING under shear, solved by rank-alignment +
+  MF-anchored consumption + geometric arrears. 100% local, deterministic, ~instant on cached OCR.
+- Remaining ceiling is OCR RECOGNITION on faint/overwritten text (watermark, dropped chars) — the
+  next lever is preprocessing (upscale/binarize/deskew) → re-OCR, or a local digit cross-checker
+  (Tesseract) on disputed money rows; explicitly deferred as it needs re-OCR, not binding logic.
+
 ## Known scope notes
 - p262 sparse alt template + p144 statement page are non-HT-template → separate class / out-of-scope for the HT parser
   (counted honestly against coverage). Possible alternate branch later.
