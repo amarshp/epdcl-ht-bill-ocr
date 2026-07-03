@@ -74,6 +74,20 @@ Alternate: sparse.py handles the p262 sparse template (9/9 fields) as a separate
   - Result: FPPCA agrees with components **233/233**; full-run chain_ok 158→159; TEST reconcile chain_ok 5→6/9;
     dev GT 98.0% unchanged. **Earlier "skip Tesseract" call was reversed by the evidence** — gated, it is a net win.
 
+## Confidence signal + deskew experiment (checkpoint follow-ups)
+- **OCR confidence kept + auto-flag (`common.ocr` now returns `[y,xmin,xmax,text,conf]`).** RapidOCR's
+  recognition returns a per-box confidence (0..1) we previously discarded. Now stored (backward-compatible
+  5th element; legacy 4-elem caches still load), surfaced in each field's provenance (`ocr_confidence`,
+  `low_confidence` when <0.9). `run_full` emits per-page `low_confidence_fields` + `needs_review`
+  (= reconcile-fail OR any low-confidence field), and coverage reports `auto_verified` vs `needs_review`.
+  Re-OCR is deterministic — verified geometry+text IDENTICAL to champion cache, so metrics are unchanged;
+  confidence is purely additive. One-time re-OCR of all 262 pages populates it.
+- **Deskew/retilt preprocessing — TESTED on frozen GT, REJECTED.** Hypothesis: straightening the scan
+  improves alignment. Measured field-exact on the 9 GT pages: base **98.0%**, deskew **96.6%** (fixed p256,
+  broke p32/p48), deskew+upscale **88.3%**. Deskew makes it WORSE — the tilt is already handled in the
+  binding layer (rank-alignment), so deskew adds nothing there while the rotation's interpolation blur
+  degrades otherwise-clean pages. Not adopted. (`preprocess.py` retained for future recognition-lever work.)
+
 ## Remaining known failures (honest)
 - **p136** fppca OCR-misread ('6689069' for ~69069) — recognition error, not binding; needs Lever B (preprocess/re-OCR).
 - **p72** excess-energy amount xmax just left of money column (0.90·maxX); frac sweep didn't help aggregate → left as-is.

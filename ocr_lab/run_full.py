@@ -32,7 +32,7 @@ FLAT = ["bill_month", "bill_date", "due_date", "service_no", "van_id", "category
 def main():
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 262
     kinds = {}
-    chain_ok = bills = 0
+    chain_ok = bills = needs_review = 0
     t0 = time.time()
     with open(os.path.join(OUT, "extract.jsonl"), "w", encoding="utf-8") as jf, \
          open(os.path.join(OUT, "table.csv"), "w", newline="", encoding="utf-8") as cf:
@@ -55,6 +55,11 @@ def main():
                 row["fields"] = fields
                 row["reconcile"] = {"chain_ok": rec["chain_ok"],
                                     "checks": {c["name"]: c["status"] for c in rec["checks"]}}
+                # actionable review signal: low-confidence fields OR a broken math line
+                low = [k for k, v in fields.items() if v.get("low_confidence")]
+                row["low_confidence_fields"] = low
+                row["needs_review"] = (not rec["chain_ok"]) or bool(low)
+                needs_review += row["needs_review"]
                 cw.writerow([p] + [fields.get(k, {}).get("value") for k in FLAT]
                             + [rec["chain_ok"], kind])
             else:
@@ -64,6 +69,8 @@ def main():
                 print(f"  ...{p}/{n}  ({time.time()-t0:.0f}s)")
 
     cov = {"pages": n, "kinds": kinds, "bill_pages": bills,
+           "needs_review": needs_review,
+           "auto_verified": bills - needs_review,
            "chain_ok": chain_ok, "chain_ok_rate": round(chain_ok / bills, 4) if bills else 0,
            "seconds": round(time.time() - t0, 1)}
     json.dump(cov, open(os.path.join(OUT, "coverage.json"), "w"), indent=2)

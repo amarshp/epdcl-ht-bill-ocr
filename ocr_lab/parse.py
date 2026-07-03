@@ -658,10 +658,27 @@ def _crosscheck_fppca(fields, boxes):
     fp["cross_check"] = {"component_sum": comp, "agree": agree,
                          "source": [cb[0], cb[1], cb[2]] if cb else None}
 
+def _apply_confidence(fields):
+    """Fill each field's OCR confidence from its value box (last source box) and
+    set low_confidence when the recognizer itself was unsure (< 0.9)."""
+    from common import conf_of
+    for fp in fields.values():
+        sb = fp.get("source_boxes") or []
+        confs = [conf_of(b) for b in sb if conf_of(b) is not None]
+        if confs:
+            c = round(min(confs), 3)
+            if fp.get("confidence") in (None, "components_agree", "components_DISAGREE"):
+                # keep any semantic cross-check confidence but record the numeric one too
+                fp["ocr_confidence"] = c
+                if fp.get("confidence") is None:
+                    fp["confidence"] = c
+            fp["low_confidence"] = c < 0.9
+
 def parse(boxes):
     """Return (fields, records). fields = provenance dict; records feed reconcile."""
     recs = build_records(boxes)
     fields = fields_from_records(recs)
     fields.update(nonmoney_fields(boxes))
     _crosscheck_fppca(fields, boxes)
+    _apply_confidence(fields)
     return fields, recs
