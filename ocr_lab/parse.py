@@ -174,6 +174,24 @@ def _row_label(boxes, mb, band):
     text = "".join(b[3] for b in line) + " " + _nonnum_prefix(mb[3])
     return text, line
 
+def _nearest_classifiable(boxes, mb, band):
+    """Return (hit, label_text, left) for the nearest label LINE (to the left of mb,
+    within band) that classifies. Falls back to the plain nearest line if none
+    classifies, preserving prior behaviour."""
+    cands = [b for b in boxes if b is not mb and b[1] < mb[1] - 3 and abs(b[0] - mb[0]) <= band]
+    if not cands:
+        return None, _nonnum_prefix(mb[3]), []
+    fallback = None
+    for c in sorted(cands, key=lambda b: abs(b[0] - mb[0])):
+        line = sorted([b for b in cands if abs(b[0] - c[0]) <= 7], key=lambda b: b[1])
+        text = "".join(b[3] for b in line) + " " + _nonnum_prefix(mb[3])
+        if fallback is None:
+            fallback = (text, line)
+        h = classify(text)
+        if h is not None:
+            return h, text, line
+    return None, fallback[0], fallback[1]
+
 def _rec(field, section, sign, mb, label_text, left, rule):
     v, raw = parse_num(mb[3])
     if v is None:
@@ -341,8 +359,9 @@ def build_records(boxes, band=16):
         if hit is not None:
             label_text, left, rule = prefix, [], f"glued:{hit[0]}"
         else:
-            label_text, left = _row_label(boxes, mb, band)
-            hit = classify(label_text)
+            # nearest label LINE THAT CLASSIFIES (skip a numeric detail line that
+            # sits between the value and its real label, e.g. NetIcd on 2026 bills)
+            hit, label_text, left = _nearest_classifiable(boxes, mb, band)
             rule = f"row:{hit[0]}" if hit else ""
         if hit is None:
             continue
@@ -511,7 +530,8 @@ def nonmoney_fields(boxes):
     # category: value box on the 'Category' label's row (handles IIA(i), IB, IIIA).
     # OCR often reads the roman numeral in parens as a digit -> accept [ivx0-9] and
     # canonicalize (e.g. 'IIA(1)' -> 'IIA(i)').
-    catlab = next((x for x in boxes if norm(x[3]) == "category"), None)
+    from difflib import SequenceMatcher
+    catlab = next((x for x in boxes if SequenceMatcher(None, norm(x[3]), "category").ratio() > 0.8), None)
     if catlab is not None:
         rowcands = [x for x in boxes if x[1] > catlab[2] and abs(x[0] - catlab[0]) <= 22
                     and re.match(r"^I{1,3}[ABC]?(\([ivx0-9]+\))?$", x[3].strip().replace(" ", ""), re.I)]
@@ -525,7 +545,9 @@ def nonmoney_fields(boxes):
         m, b = _find(boxes, r"\b(I{1,3}[ABC]?\s?\([iv]+\))")
         add("category", m, b, "regex:category")
     # contracted MD: value box on the 'Contracted MD' / 'Contract MD' row
-    mdlab = next((x for x in boxes if "contract" in norm(x[3]) and "md" in norm(x[3])), None)
+    # match on 'md'+'kva' (robust to 'Contracted'->'Cncracted' OCR noise)
+    mdlab = next((x for x in boxes if "md" in norm(x[3]) and "kva" in norm(x[3])
+                  and len(norm(x[3])) < 25), None)
     if mdlab is not None:
         # pure-integer box on the label's row (avoid dates/VAN IDs like '-2024')
         cand = [x for x in boxes if x[1] > mdlab[2] and abs(x[0] - mdlab[0]) <= 18
