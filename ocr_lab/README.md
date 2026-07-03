@@ -8,6 +8,8 @@ The deterministic core is **100% local, offline, and CPU-only**. An optional
 tier-2 re-reads only the pages that fail their own accounting, using either a
 local VLM (offline) or a cloud VLM (fast) — always gated by the same guardrail.
 
+![A scanned EPDCL HT bill with detected field boxes on the left, extracted into structured values on the right whose accounting chain (sub-total → total → net bill → net payable) reconciles to the paise](docs/hero.png)
+
 ---
 
 ## Highlights
