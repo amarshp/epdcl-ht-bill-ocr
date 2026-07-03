@@ -10,6 +10,38 @@ local VLM (offline) or a cloud VLM (fast) — always gated by the same guardrail
 
 ---
 
+## Highlights
+
+- **Production, end-to-end.** One command turns a folder of scanned bills into
+  structured, provenance-tracked fields **+ a ranked human-review queue**.
+- **Self-healing.** Every bill is checked against its own arithmetic to the paise;
+  a page that doesn't reconcile is automatically re-read by a vision model and, where
+  the ledger allows, **auto-corrected** (e.g. a flipped arrears sign is recovered from
+  `net_bill` & `net_payable`). Nothing wrong is accepted silently.
+- **Autonomous.** Runs unattended; only the genuinely-unreadable residue reaches a person.
+- **Local-first, cloud-optional.** 100% offline deterministic core; optional **Google
+  Gemini** vision QC *only* when you allow it, *only* on the flagged pages.
+- **Confidential mode.** A **fully-offline** path (local VLM QC) where no bill ever
+  leaves the machine — nothing is sent to any cloud.
+- **Featherweight core.** CPU-only, **no GPU**, ~270 MB RAM/worker, 15 MB models.
+- **Minimal — and *safe* — HITL.** ~137/234 bills auto-verify with zero human touch;
+  QC clears most of the rest, and the review gate is tuned so **0 wrong money values
+  ever reach you unflagged** (flag-recall measured on held-out pages).
+
+### Deployment modes — same guardrail, pick your trade-off
+
+| mode | data leaves machine | footprint | speed | human queue |
+|------|:---:|---|---|---|
+| **Confidential** — deterministic + local VLM QC | **never** | heavier on flagged pages (~7–14 GB, VLM) | slow (~2–4 min/flagged pg) | small |
+| **Fast** — deterministic + Gemini QC | flagged pages → Google | **low** (CPU-only) | fast (~13 s/flagged pg, ~$1/yr) | **~none** |
+| **Pure local** — deterministic only | **never** | **low** (CPU-only) | fast | moderate |
+
+> Honest note: *featherweight*, *near-zero-HITL*, and *fully-confidential* trade against
+> each other on the **flagged ~40% minority** — the clean majority is fast, local, and
+> hands-free in every mode.
+
+---
+
 ## The pipeline at a glance
 
 ```mermaid
