@@ -136,7 +136,8 @@ CATALOG = [
     ("total",          "val", +1, ["total"]),   # generic 'total' LAST
 ]
 
-_NETBILL_FUZZY = re.compile(r"netb\w{0,3}am\w{0,2}t")   # 'Net Bll Amount' OCR typo
+# 'Net Bill Amount' OCR typos: 'Net Bll'(i->l), 'Nct Bill'(e->c) -> n.t b .. am..t
+_NETBILL_FUZZY = re.compile(r"n.tb\w{0,4}am\w{0,3}t")
 
 def classify(label):
     n = norm(label)
@@ -464,6 +465,19 @@ def fields_from_records(recs):
     return out
 
 # ---- non-money fields (dates / ids / consumption) --------------------------
+def _canon_category(s):
+    """Canonicalize a category code: uppercase the class, roman-ize the paren index
+    (OCR reads i/ii/iii as 1/11/111). 'IIA(1)'->'IIA(i)', 'IIIA'->'IIIA', 'IB'->'IB'."""
+    s = s.strip().replace(" ", "")
+    m = re.match(r"^(I{1,3}[ABC]?)(\((.*)\))?$", s, re.I)
+    if not m:
+        return s
+    base = m.group(1).upper()
+    inner = m.group(3)
+    if inner is None:
+        return base
+    return f"{base}({inner.lower().replace('1', 'i')})"
+
 def _find(boxes, pat, flags=0):
     rx = re.compile(pat, flags)
     for b in boxes:
@@ -494,14 +508,19 @@ def nonmoney_fields(boxes):
     add("service_no", m, b, "regex:serviceno")
     m, b = _find(boxes, r"(APEPDC\d+)")
     add("van_id", m, b, "regex:vanid")
-    # category: value box on the 'Category' label's row (handles IIA(i), IB, IIIA)
+    # category: value box on the 'Category' label's row (handles IIA(i), IB, IIIA).
+    # OCR often reads the roman numeral in parens as a digit -> accept [ivx0-9] and
+    # canonicalize (e.g. 'IIA(1)' -> 'IIA(i)').
     catlab = next((x for x in boxes if norm(x[3]) == "category"), None)
     if catlab is not None:
-        rowcands = [x for x in boxes if x[1] > catlab[2] and abs(x[0] - catlab[0]) <= 20
-                    and re.match(r"^I{1,3}[ABC]?(\([ivx]+\))?$", x[3].strip().replace(" ", ""), re.I)]
+        rowcands = [x for x in boxes if x[1] > catlab[2] and abs(x[0] - catlab[0]) <= 22
+                    and re.match(r"^I{1,3}[ABC]?(\([ivx0-9]+\))?$", x[3].strip().replace(" ", ""), re.I)]
         if rowcands:
             cb = min(rowcands, key=lambda x: x[1])
-            add("category", re.match(r"(.*)", cb[3].strip()), cb, "row:category")
+            out["category"] = {"value": _canon_category(cb[3]), "raw_text": cb[3],
+                               "bbox": [cb[0], cb[1], cb[2]], "source_boxes": [list(cb)],
+                               "confidence": None, "rule": "row:category",
+                               "observed": True, "candidates": []}
     if "category" not in out:
         m, b = _find(boxes, r"\b(I{1,3}[ABC]?\s?\([iv]+\))")
         add("category", m, b, "regex:category")
