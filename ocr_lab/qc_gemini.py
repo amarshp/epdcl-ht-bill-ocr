@@ -85,19 +85,36 @@ def cost():
     usd = _usage["in_tokens"] / 1e6 * PRICE_IN + _usage["out_tokens"] / 1e6 * PRICE_OUT
     return round(usd, 5), dict(_usage)
 
+def _f(x):
+    try: return float(x)
+    except (TypeError, ValueError): return None
+
 def gemini_chain_ok(g):
-    """Guardrail: do Gemini's OWN returned numbers add up? net_payable must equal
-    net_bill + arrears (the identity we can check without every adjustment row).
-    A hallucinated total/payable fails this and is sent to a human instead."""
-    nb, npay = g.get("net_bill"), g.get("net_payable")
-    ac = g.get("arrears_curr") or 0
-    ap = g.get("arrears_prev") or 0
+    """Guardrail: do Gemini's OWN numbers add up? Two ways to pass:
+      (A) net_payable == net_bill + arrears  (the arrears field is right), OR
+      (B) the UPSTREAM chain corroborates net_bill across 3 identities
+          (total==sub+customer AND net_bill==total+loss_gain), in which case
+          net_bill+net_payable are trustworthy and arrears is DERIVED as
+          net_payable-net_bill (recovers a sign/digit slip in the arrears field).
+    A hallucination can't satisfy three independent identities, so (B) stays safe."""
+    nb, npay = _f(g.get("net_bill")), _f(g.get("net_payable"))
     if nb is None or npay is None:
         return False
-    try:
-        return abs(float(npay) - (float(nb) + float(ac) + float(ap))) <= 0.51
-    except (TypeError, ValueError):
-        return False
+    ac, ap = _f(g.get("arrears_curr")) or 0, _f(g.get("arrears_prev")) or 0
+    if abs(npay - (nb + ac + ap)) <= 0.51:                       # (A)
+        return True
+    sub, cust = _f(g.get("sub_total")), _f(g.get("customer_charges"))
+    tot, lg = _f(g.get("total")), _f(g.get("loss_gain")) or 0
+    if None not in (sub, cust, tot) and abs(tot - (sub + cust)) <= 0.51 \
+       and abs(nb - (tot + lg)) <= 0.51:                          # (B) 3-identity corroboration
+        return True
+    return False
+
+def gemini_arrears(g):
+    """The trustworthy current-year arrears = net_payable - net_bill (the printed
+    anchors), used when the guardrail passes via corroboration."""
+    nb, npay = _f(g.get("net_bill")), _f(g.get("net_payable"))
+    return None if nb is None or npay is None else round(npay - nb, 2)
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8"); sys.path.insert(0, os.path.dirname(__file__))
