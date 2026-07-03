@@ -607,9 +607,40 @@ def consumption_fields(boxes):
     return out
 
 # ---- top-level API ---------------------------------------------------------
+def fppca_components(boxes):
+    """Sum the printed FPPCA breakdown '(a+b+(-c))' -> float (or None). The bill
+    prints FPPCA as a component expression; summing it is an independent read of
+    the SAME printed value (not imputation from other fields)."""
+    b = next((x for x in boxes if "fppca" in norm(x[3])), None)
+    if b is None:
+        return None, None
+    t = b[3].replace("（", "(").replace("）", ")")
+    m = re.search(r"charge\s*\((.*)\)", t, re.I)
+    if not m:
+        return None, b
+    expr = m.group(1).replace("+(-", "-").replace("(-", "-").replace(")", "").replace("(", "")
+    vals = [float(n) for n in re.findall(r"[+-]?\d+\.?\d*", expr) if re.search(r"\d", n)]
+    return (round(sum(vals), 2), b) if vals else (None, b)
+
+def _crosscheck_fppca(fields, boxes):
+    """Annotate the FPPCA field confidence by cross-checking the amount against its
+    own printed component sum. Does NOT change the value (no imputation) — records
+    agreement + the component sum as a candidate for downstream review."""
+    fp = fields.get("fppca")
+    if not fp or fp.get("value") is None:
+        return
+    comp, cb = fppca_components(boxes)
+    if comp is None:
+        return
+    agree = abs(fp["value"] - comp) <= 0.02
+    fp["confidence"] = "components_agree" if agree else "components_DISAGREE"
+    fp["cross_check"] = {"component_sum": comp, "agree": agree,
+                         "source": [cb[0], cb[1], cb[2]] if cb else None}
+
 def parse(boxes):
     """Return (fields, records). fields = provenance dict; records feed reconcile."""
     recs = build_records(boxes)
     fields = fields_from_records(recs)
     fields.update(nonmoney_fields(boxes))
+    _crosscheck_fppca(fields, boxes)
     return fields, recs
