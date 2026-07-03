@@ -31,7 +31,7 @@ PROMPT = """You are auditing a scanned Andhra Pradesh EPDCL HT electricity bill.
 Read the printed values EXACTLY as shown (ignore faint noise; trust the printed digits).
 Return ONLY JSON with these keys (numbers as plain numbers, no commas, no currency):
   service_no, category, bill_month, sub_total, customer_charges, total,
-  net_bill, net_payable, arrears_curr, loss_gain,
+  net_bill, net_payable, arrears_prev, arrears_curr, loss_gain,
   cons_kwh, cons_kvah, cons_kva, cons_pf, cons_lf.
 category is the printed tariff code like IIA(i), IB, IIIA, IIB.
 arrears_curr is the '(Current Years) Arrears after ...' amount (signed; may be negative or 0).
@@ -39,18 +39,46 @@ loss_gain is 'Loss (or) Gain' (signed).
 cons_pf is Power Factor (between 0 and 1). cons_lf is Load Factor % (integer, or null if blank).
 If a value is genuinely unreadable, use null."""
 
+# Gemini 2.5 Flash public pricing (USD per 1M tokens), as of 2025.
+PRICE_IN, PRICE_OUT = 0.30, 2.50
+_usage = {"calls": 0, "in_tokens": 0, "out_tokens": 0}
+
 def qc_page(page, img):
-    """Ask Gemini to read the page. Returns dict of fields (or {} on failure)."""
+    """Ask Gemini to read the page. Returns dict of fields (or {} on failure).
+    Accumulates token usage in the module-level _usage counter."""
     resp = client().models.generate_content(
         model=_MODEL,
         contents=[PROMPT, img],
         config=types.GenerateContentConfig(temperature=0.0,
                                             response_mime_type="application/json"),
     )
+    u = resp.usage_metadata
+    _usage["calls"] += 1
+    _usage["in_tokens"] += (u.prompt_token_count or 0)
+    _usage["out_tokens"] += (u.candidates_token_count or 0)
     try:
         return json.loads(resp.text)
     except Exception:
         return {}
+
+def cost():
+    """Return (usd, usage_dict) for all qc_page calls so far."""
+    usd = _usage["in_tokens"] / 1e6 * PRICE_IN + _usage["out_tokens"] / 1e6 * PRICE_OUT
+    return round(usd, 5), dict(_usage)
+
+def gemini_chain_ok(g):
+    """Guardrail: do Gemini's OWN returned numbers add up? net_payable must equal
+    net_bill + arrears (the identity we can check without every adjustment row).
+    A hallucinated total/payable fails this and is sent to a human instead."""
+    nb, npay = g.get("net_bill"), g.get("net_payable")
+    ac = g.get("arrears_curr") or 0
+    ap = g.get("arrears_prev") or 0
+    if nb is None or npay is None:
+        return False
+    try:
+        return abs(float(npay) - (float(nb) + float(ac) + float(ap))) <= 0.51
+    except (TypeError, ValueError):
+        return False
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8"); sys.path.insert(0, os.path.dirname(__file__))
