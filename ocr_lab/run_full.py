@@ -12,7 +12,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, os.path.dirname(__file__))
 from common import ocr, classify
 from parse import parse
-from reconcile import reconcile
+from reconcile import reconcile, page_needs_review
 from sparse import is_sparse, sparse_parse
 try:
     from tess_check import recover_fppca as _tess_recover
@@ -56,9 +56,8 @@ def main():
                 row["reconcile"] = {"chain_ok": rec["chain_ok"],
                                     "checks": {c["name"]: c["status"] for c in rec["checks"]}}
                 # actionable review signal: low-confidence fields OR a broken math line
-                low = [k for k, v in fields.items() if v.get("low_confidence")]
-                row["low_confidence_fields"] = low
-                row["needs_review"] = (not rec["chain_ok"]) or bool(low)
+                row["low_confidence_fields"] = [k for k, v in fields.items() if v.get("low_confidence")]
+                row["needs_review"] = page_needs_review(fields, rec)
                 needs_review += row["needs_review"]
                 cw.writerow([p] + [fields.get(k, {}).get("value") for k in FLAT]
                             + [rec["chain_ok"], kind])

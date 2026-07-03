@@ -6,7 +6,9 @@
     "BILL?": 12
   },
   "bill_pages": 234,
-  "chain_ok": 159,
-  "chain_ok_rate": 0.6795,
-  "seconds": 0.8
+  "needs_review": 97,
+  "auto_verified": 137,
+  "chain_ok": 167,
+  "chain_ok_rate": 0.7137,
+  "seconds": 0.9
 }

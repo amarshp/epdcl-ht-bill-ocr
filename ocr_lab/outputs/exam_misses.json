@@ -1,12 +1,4 @@
 {
-  "12": [
-    [
-      "category",
-      null,
-      "IIA(i)",
-      null
-    ]
-  ],
   "116": [
     [
       "cons_pf",
@@ -17,12 +9,6 @@
         1378.4,
         1428.6
       ]
-    ],
-    [
-      "contracted_md",
-      null,
-      2500,
-      null
     ]
   ],
   "132": [
@@ -44,12 +30,6 @@
     ]
   ],
   "244": [
-    [
-      "neticd",
-      null,
-      -45322,
-      null
-    ],
     [
       "category",
       null,

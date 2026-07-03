@@ -16,6 +16,28 @@ from parse import parse
 
 TOL = 0.02
 
+# core fields that should ALWAYS be present on an HT bill; a missing one is itself
+# a reason to route the page to human review.
+CORE_FIELDS = ("service_no", "category", "bill_month", "sub_total", "total", "net_payable")
+
+def page_needs_review(fields, rec):
+    """Production safety gate — PRECISE triage, not a blanket flag. Route a page to
+    human review only on a real signal:
+      1. the accounting chain doesn't close (catches every money error),
+      2. a core field is missing, or
+      3. a value is out of its valid range (PF must be 0..1) — catches misreads
+         that don't break the money math.
+    A blanket 'any low-confidence field' flag was dropped: it flagged ~80% of clean
+    pages (a faint char somewhere) and drowned the real signal."""
+    if not rec.get("chain_ok"):
+        return True
+    if any(fields.get(k, {}).get("value") is None for k in CORE_FIELDS):
+        return True
+    pf = fields.get("cons_pf", {}).get("value")
+    if pf is not None and not (0.0 <= pf <= 1.05):
+        return True
+    return False
+
 def _sum(recs, section):
     return round(sum(r["value"] for r in recs if r["section"] == section), 2)
 
