@@ -521,8 +521,19 @@ def nonmoney_fields(boxes):
     add("bill_month", m, b, "regex:month")
     m, b = _find(boxes, r"[Dd]ated[:\s]*([0-3]?\d-[A-Za-z0-9]{2,}-\d{4})")
     add("bill_date", m, b, "regex:dated")
-    m, b = _find(boxes, r"\b(\d{1,2}-[A-Z][a-z]{2}-\d{4})\b")     # due date
-    add("due_date", m, b, "regex:duedate")
+    # due date = the date on the 'Payable on or before' row (NOT the DISC.DT date).
+    # month is case-insensitive ('18-NoV-2025' OCR).
+    pay = next((x for x in boxes if "payable" in norm(x[3]) and "before" in norm(x[3])), None)
+    if pay is not None:
+        dc = [x for x in boxes if abs(x[0] - pay[0]) <= 20
+              and re.search(r"\d{1,2}-[A-Za-z]{3}-\d{4}", x[3])]
+        if dc:
+            db = min(dc, key=lambda x: x[1])
+            add("due_date", re.search(r"(\d{1,2}-[A-Za-z]{3}-\d{4})", db[3]), db, "row:duedate")
+    if "due_date" not in out:
+        m, b = _find(boxes, r"\b(\d{1,2}-[A-Za-z]{3}-\d{4})\b")   # fallback (skip DISC.DT)
+        if b is not None and "disc" not in norm(b[3]):
+            add("due_date", m, b, "regex:duedate")
     m, b = _find(boxes, r"\b(VSP\s?\d+)\b", re.I)
     add("service_no", m, b, "regex:serviceno")
     m, b = _find(boxes, r"(APEPDC\d+)")
@@ -545,8 +556,9 @@ def nonmoney_fields(boxes):
         m, b = _find(boxes, r"\b(I{1,3}[ABC]?\s?\([iv]+\))")
         add("category", m, b, "regex:category")
     # contracted MD: value box on the 'Contracted MD' / 'Contract MD' row
-    # match on 'md'+'kva' (robust to 'Contracted'->'Cncracted' OCR noise)
-    mdlab = next((x for x in boxes if "md" in norm(x[3]) and "kva" in norm(x[3])
+    # anchor on 'md'+'hp' (the '/HP' survives even when 'KVA' garbles to 'VA'/'RVA'
+    # and 'Contracted'->'Cncracted')
+    mdlab = next((x for x in boxes if "md" in norm(x[3]) and "hp" in norm(x[3])
                   and len(norm(x[3])) < 25), None)
     if mdlab is not None:
         # pure-integer box on the label's row (avoid dates/VAN IDs like '-2024')
@@ -652,12 +664,15 @@ def consumption_fields(boxes):
         return d
 
     # Multiplying-Factor row := KWH==KVAH==KVA present and equal
+    # Multiplying-Factor row = KWH==KVAH (the only value row where they're equal).
+    # Only 2 of 3 required — the KVA MF cell is sometimes not OCR'd (p126).
     mf_i = None
     for i, row in enumerate(rows_):
         d = rowmap(row)
-        vs = [parse_num(d[k][3])[0] for k in ("cons_kwh", "cons_kvah", "cons_kva") if k in d]
-        if len(vs) == 3 and max(vs) - min(vs) < 1e-6:
-            mf_i = i
+        if "cons_kwh" in d and "cons_kvah" in d:
+            a = parse_num(d["cons_kwh"][3])[0]; b2 = parse_num(d["cons_kvah"][3])[0]
+            if a is not None and b2 is not None and abs(a - b2) < 1e-6 and a < 2000:
+                mf_i = i
     if mf_i is None or mf_i + 1 >= len(rows_):
         return out
     tc = rowmap(rows_[mf_i + 1])                      # Total Consumption = next row
