@@ -59,13 +59,20 @@ Alternate: sparse.py handles the p262 sparse template (9/9 fields) as a separate
   by summing the printed FPPCA component expression `(15488.25+33724.00+19856.74)=69068.99`, but that
   edges into the derived-value concern (codex #3) and p136 has no frozen GT — DEFERRED, not adopted.
   Verdict: pixel preprocessing alone does not beat the champion here.
-- **Recognition-lever experiment (FPPCA component cross-check vs Tesseract), evidence-driven decision:**
-  Cross-checked each FPPCA amount against its own printed component breakdown across all 233 bill pages
-  → **227 agree (97%), 6 disagree, only 1 (p136) is a real recovery** (test page, no GT). Conclusion:
-  money OCR recognition is already strong — not the bottleneck. **Adopted** the cross-check as a
-  provenance CONFIDENCE flag (`fppca.confidence` = components_agree/DISAGREE + component_sum candidate);
-  NO value change, no imputation. **Skipped Tesseract** (not installed; ~0–2 page ROI by this evidence;
-  cannot fix watermark-destroyed pixels). Value-recovery from components deferred (1 page, no-imputation risk).
+- **Recognition-lever investigation (FPPCA component cross-check + Tesseract) — actually tried, decision reversed.**
+  FPPCA amount vs its printed component breakdown across 233 bill pages → 227 agree, 6 disagree. An agent +
+  my own vision classified the 6: **5 are BINDING errors** (p91/94/98/217/226 — the true amount is a real
+  money box, swapped with tod_charges by row-offset) and **1 is a RECOGNITION error** (p136 — RapidOCR
+  misread `69068.99` as `6689069`). Global Tesseract test: blind second-read fixes 1 but REGRESSES 29
+  (drops decimals/signs) → net negative. So:
+  - **`_recover_fppca_swap` (parse.py):** component sum as ARBITER to swap fppca back to its correct OBSERVED
+    box. Fixes all 5 binding pages. No imputation (value stays a real box), no new dependency.
+  - **`tess_check.recover_fppca`:** GATED Tesseract — fires ONLY when fppca still disagrees post-swap, adopts
+    ONLY if Tesseract then matches the component sum. Fixes p136; never touches the 227 correct pages →
+    avoids all 29 blind-Tesseract regressions. Tesseract (an ALLOWED local engine) extracted no-admin to
+    %LOCALAPPDATA%; wired optionally into run_full/eval (graceful degrade if absent).
+  - Result: FPPCA agrees with components **233/233**; full-run chain_ok 158→159; TEST reconcile chain_ok 5→6/9;
+    dev GT 98.0% unchanged. **Earlier "skip Tesseract" call was reversed by the evidence** — gated, it is a net win.
 
 ## Remaining known failures (honest)
 - **p136** fppca OCR-misread ('6689069' for ~69069) — recognition error, not binding; needs Lever B (preprocess/re-OCR).

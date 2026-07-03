@@ -1,8 +1,8 @@
 {
-  "approach": "v6_champion_honest_allfields",
-  "git_commit": "bf79dee",
+  "approach": "v8_fppca_swap_plus_gated_tesseract",
+  "git_commit": "1ae2369",
   "run": "cd ocr_lab && python run_full.py 262   # -> outputs/{extract.jsonl,table.csv,coverage.json}",
-  "deps": "rapidocr-onnxruntime, pypdf, PIL, opencv-python, numpy, onnxruntime (CPU)",
+  "deps": "rapidocr-onnxruntime, pypdf, PIL, opencv-python, numpy, onnxruntime (CPU); OPTIONAL: pytesseract + Tesseract 5.4 (%LOCALAPPDATA%\\Programs\\Tesseract-OCR) for gated fppca recovery (graceful degrade)",
   "cache_variant": "base",
   "metrics": {
     "gt_field_exact_dev_ALLFIELDS": "98.0% (201/205, provenance-enforced)",
@@ -12,10 +12,11 @@
     "ids": "96%",
     "amount_words": "100%",
     "reconcile_chain_ok_dev": "14/16",
-    "reconcile_chain_ok_test": "5/9",
+    "reconcile_chain_ok_test": "6/9 (was 5/9; p136 recovered)",
     "FULL262_coverage": "HT 232 / sparse 10 / BILL? 2 / OTHER 18 (262/262 handled)",
-    "FULL262_reconcile": "subT 95%, total 90%, net_bill 81%, net_payable 72%, chain_ok 158/234=67.5%",
-    "FULL262_field_presence": "service_no 100%, bill_month 100%, net_payable 98%"
+    "FULL262_reconcile": "chain_ok 159/234; fppca 233/233 agree w/ components",
+    "FULL262_field_presence": "service_no 100%, bill_month 100%, net_payable 98%",
+    "fppca_component_agreement": "233/233 (was 227; 5 binding swaps + 1 gated Tesseract recovery)"
   },
   "gt_version": "frozen 9-page vision GT (committed)",
   "known_failures": [
