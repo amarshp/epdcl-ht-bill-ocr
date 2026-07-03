@@ -4,7 +4,7 @@ re-validates them against the bill's own accounting (reconcile). The VLM can onl
 'fix' a page by producing numbers that close the paise-level ledger; it can't
 smuggle a wrong-but-plausible value past it.
 """
-import os, re, json, sys
+import os, re, json, sys, time
 from google import genai
 from google.genai import types
 
@@ -43,23 +43,42 @@ If a value is genuinely unreadable, use null."""
 PRICE_IN, PRICE_OUT = 0.30, 2.50
 _usage = {"calls": 0, "in_tokens": 0, "out_tokens": 0}
 
-def qc_page(page, img):
-    """Ask Gemini to read the page. Returns dict of fields (or {} on failure).
-    Accumulates token usage in the module-level _usage counter."""
-    resp = client().models.generate_content(
-        model=_MODEL,
-        contents=[PROMPT, img],
-        config=types.GenerateContentConfig(temperature=0.0,
-                                            response_mime_type="application/json"),
-    )
+_CACHE = os.path.join(os.path.dirname(__file__), "cache", "gemini")
+os.makedirs(_CACHE, exist_ok=True)
+
+def qc_page(page, img, retries=5):
+    """Ask Gemini to read the page. Cached per page (resumable, no re-cost).
+    Retries transient 429/503 with backoff. Accumulates token usage."""
+    cf = os.path.join(_CACHE, f"p{page}.json")
+    if os.path.exists(cf):
+        return json.load(open(cf, encoding="utf-8"))
+    from google.genai import errors
+    delay = 4
+    for attempt in range(retries):
+        try:
+            resp = client().models.generate_content(
+                model=_MODEL, contents=[PROMPT, img],
+                config=types.GenerateContentConfig(temperature=0.0,
+                                                    response_mime_type="application/json"))
+            break
+        except errors.ServerError:                     # 5xx incl. 503 high-demand
+            if attempt == retries - 1:
+                raise
+            time.sleep(delay); delay *= 2
+        except errors.ClientError as e:                # 429 rate limit
+            if getattr(e, "code", None) != 429 or attempt == retries - 1:
+                raise
+            time.sleep(delay); delay *= 2
     u = resp.usage_metadata
     _usage["calls"] += 1
     _usage["in_tokens"] += (u.prompt_token_count or 0)
     _usage["out_tokens"] += (u.candidates_token_count or 0)
     try:
-        return json.loads(resp.text)
+        data = json.loads(resp.text)
     except Exception:
-        return {}
+        data = {}
+    json.dump(data, open(cf, "w", encoding="utf-8"))
+    return data
 
 def cost():
     """Return (usd, usage_dict) for all qc_page calls so far."""
