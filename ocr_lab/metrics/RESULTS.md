@@ -59,6 +59,13 @@ Alternate: sparse.py handles the p262 sparse template (9/9 fields) as a separate
   by summing the printed FPPCA component expression `(15488.25+33724.00+19856.74)=69068.99`, but that
   edges into the derived-value concern (codex #3) and p136 has no frozen GT — DEFERRED, not adopted.
   Verdict: pixel preprocessing alone does not beat the champion here.
+- **Recognition-lever experiment (FPPCA component cross-check vs Tesseract), evidence-driven decision:**
+  Cross-checked each FPPCA amount against its own printed component breakdown across all 233 bill pages
+  → **227 agree (97%), 6 disagree, only 1 (p136) is a real recovery** (test page, no GT). Conclusion:
+  money OCR recognition is already strong — not the bottleneck. **Adopted** the cross-check as a
+  provenance CONFIDENCE flag (`fppca.confidence` = components_agree/DISAGREE + component_sum candidate);
+  NO value change, no imputation. **Skipped Tesseract** (not installed; ~0–2 page ROI by this evidence;
+  cannot fix watermark-destroyed pixels). Value-recovery from components deferred (1 page, no-imputation risk).
 
 ## Remaining known failures (honest)
 - **p136** fppca OCR-misread ('6689069' for ~69069) — recognition error, not binding; needs Lever B (preprocess/re-OCR).
