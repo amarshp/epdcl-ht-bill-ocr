@@ -15,6 +15,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 from common import ocr, classify, DEV_BILLS, TEST_BILLS
 from parse import parse
 from reconcile import reconcile
+try:
+    from tess_check import recover_fppca as _tess_recover
+except Exception:
+    def _tess_recover(*a, **k):
+        return False
 
 ROOT = os.path.dirname(__file__)
 GT_DIR = os.path.join(ROOT, "samples", "gt")
@@ -101,6 +106,7 @@ def score_reconcile(pages):
             continue
         bills += 1
         fields, recs = parse(boxes)
+        _tess_recover(fields, recs, boxes, p)   # gated Tesseract fppca recovery
         r = reconcile(fields, recs)
         chain_ok += r["chain_ok"]
         for c in checks:

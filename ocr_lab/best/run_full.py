@@ -14,6 +14,11 @@ from common import ocr, classify
 from parse import parse
 from reconcile import reconcile
 from sparse import is_sparse, sparse_parse
+try:
+    from tess_check import recover_fppca as _tess_recover
+except Exception:
+    def _tess_recover(*a, **k):           # Tesseract optional; degrade gracefully
+        return False
 
 ROOT = os.path.dirname(__file__)
 OUT = os.path.join(ROOT, "outputs")
@@ -44,6 +49,7 @@ def main():
                             + [None, "sparse_bill"])
             elif kind in ("HT_BILL", "BILL?"):
                 fields, recs = parse(boxes)
+                _tess_recover(fields, recs, boxes, p)   # gated Tesseract fppca recovery
                 rec = reconcile(fields, recs)
                 bills += 1; chain_ok += rec["chain_ok"]
                 row["fields"] = fields

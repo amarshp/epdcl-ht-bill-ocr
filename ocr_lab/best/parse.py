@@ -350,6 +350,27 @@ def build_records(boxes, band=16):
         if r:
             recs.append(r)
     recs = _fix_arrears(recs, lower, boxes)
+    recs = _recover_fppca_swap(recs, boxes)
+    return recs
+
+def _recover_fppca_swap(recs, boxes):
+    """FPPCA amount MUST equal its printed component sum. If it doesn't but another
+    upper-charge record DOES hold that value, the two boxes were swapped by the
+    row-offset — swap them back. Uses the component sum only as an ARBITER to pick
+    the right OBSERVED box (no imputation: values stay real OCR boxes)."""
+    comp, _ = fppca_components(boxes)
+    if comp is None:
+        return recs
+    fr = next((r for r in recs if r["field"] == "fppca"), None)
+    if fr is None or abs(fr["value"] - comp) <= 0.02:
+        return recs
+    r2 = next((r for r in recs if r["section"] == "sub" and r is not fr
+               and abs(r["value"] - comp) <= 0.02), None)
+    if r2 is None:
+        return recs                       # true box misread -> Tesseract layer handles it
+    for k in ("value", "raw_text", "amount_bbox", "source_boxes"):
+        fr[k], r2[k] = r2[k], fr[k]
+    fr["rule"] = "fppca_swap_corrected"; r2["rule"] = r2["rule"] + "|swapped"
     return recs
 
 def _fix_arrears(recs, lower_money, all_boxes):
