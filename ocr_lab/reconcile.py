@@ -48,6 +48,24 @@ def page_needs_review(fields, rec):
     return False
 
 
+def bottomline_reconciles(fields, tol=0.51):
+    """Corroboration rescue: even when the FULL accounting chain didn't close,
+    trust the bill's bottom line if its printed anchors self-satisfy identity A —
+    net_payable == net_bill + current-year arrears — to the paise. This is the
+    SAME identity the tier-2 QC guardrail accepts, applied to the deterministic
+    read. Requires all three anchors observed and none low-confidence (never
+    accept a value the OCR itself doubted). Catches pages flagged only for an
+    upper-table binding slip whose net-payable is nonetheless provably correct."""
+    ks = ("net_bill", "arrears_curr", "net_payable")
+    v = {}
+    for k in ks:
+        f = fields.get(k, {})
+        if f.get("value") is None or f.get("low_confidence"):
+            return False
+        v[k] = f["value"]
+    return abs(v["net_bill"] + v["arrears_curr"] - v["net_payable"]) <= tol
+
+
 def _sum(recs, section):
     return round(sum(r["value"] for r in recs if r["section"] == section), 2)
 

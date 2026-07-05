@@ -42,8 +42,12 @@ _TMP = os.path.join(os.path.dirname(__file__), "cache", "uocr")
 os.makedirs(_TMP, exist_ok=True)
 
 
-def transcribe(img):
-    """Full-page image -> structured HTML/markdown transcription (string)."""
+def transcribe(img, page=None):
+    """Full-page image -> structured HTML/markdown transcription (string).
+    Cached per page (resumable, no re-compute) when `page` is given."""
+    cf = os.path.join(_TMP, f"p{page}.html") if page is not None else None
+    if cf and os.path.exists(cf):
+        return open(cf, encoding="utf-8").read()
     model, tok = _load()
     p = os.path.join(_TMP, "_in.png")
     img.save(p)
@@ -62,7 +66,11 @@ def transcribe(img):
             ngram_window=128,
             save_results=False,
         )
-    return buf.getvalue()
+    html = buf.getvalue()
+    if cf:
+        with open(cf, "w", encoding="utf-8") as f:
+            f.write(html)
+    return html
 
 
 _NUM = r"(-?[\d,]+\.\d{2})"
@@ -82,8 +90,15 @@ def parse_fields(html):
     f["net_bill"] = _n(re.search(r"Net Bill Amount\s+" + _NUM, t, re.I))
     f["sub_total"] = _n(re.search(r"Sub Total\s+" + _NUM, t, re.I))
     f["customer_charges"] = _n(re.search(r"Customer Charges\s+" + _NUM, t, re.I))
+    # skip an optional "after <DD-Mon-YYYY>" between the label and the amount
+    # (the date's digits used to halt an [^0-9-]* skip, dropping the value)
     f["arrears_curr"] = _n(
-        re.search(r"Current Years?\)?\s*Arrears[^0-9-]*" + _NUM, t, re.I)
+        re.search(
+            r"Current Years?\)?\s*Arrears(?:\s+after)?(?:\s+\d{1,2}-\w{3}-\d{4})?\s*"
+            + _NUM,
+            t,
+            re.I,
+        )
     )
     f["loss_gain"] = _n(re.search(r"Loss\s*\(or\)\s*Gain\s+" + _NUM, t, re.I))
     # grand Total: last "Total <num>" that isn't "Sub Total"/"Total Consumption"/"TOD..."

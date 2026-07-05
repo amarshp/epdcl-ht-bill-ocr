@@ -66,7 +66,14 @@ Whatever neither tier can close. On the measured batch this was **2 pages**
   non-money Load-Factor %.
 - **Gemini QC:** 105/107 flagged resolved; human queue → 0 after the 3-identity
   guardrail; cost ~$0.08/batch, ~$1/year.
-- **17 accounting tests** green (`test_accounting.py`).
+- **Local QC (`--qc uocr`), measured end-to-end:** 97 flagged → 67 resolved by
+  uocr + 19 rescued by bottom-line corroboration → **11 human** (of 234 bills,
+  ~4.7%). Fully offline, 0 silent money errors. Two fixes got it there from an
+  initial 40 human: (a) arrears regex now skips the `after <date>` between label
+  and value; (b) `bottomline_reconciles` accepts a flagged page when its printed
+  anchors satisfy `net_payable = net_bill + arrears` to the paise (same identity
+  the QC guardrail trusts; gated on no low-confidence field).
+- **19 accounting tests** green (`test_accounting.py`).
 
 Methodology note: the held-out pools were **never exhausted** — ~170 pristine
 pages remain, so any future change can still be measured honestly for overfit.
@@ -79,9 +86,10 @@ pages remain, so any future change can still be measured honestly for overfit.
 - **`--qc uocr` on the hardest pages:** Unlimited-OCR is flawless on clean bills but
   **leaves the lower-right money cells blank on faint/credit lower panels** — exactly
   the flagged minority. Those don't self-reconcile → they correctly fall back (human,
-  or gemini). So the local path leaves a *larger* human residue than the cloud path.
-  It is safe, just less complete. Its true resolve-rate over all ~107 flagged pages
-  was **not** run end-to-end (would take ~4–7 hrs at 2–4 min/pg) — good overnight job.
+  or gemini). So the local path leaves a *larger* human residue than the cloud path
+  (**11 vs 2**, now measured — see §3). It is safe, just less complete. The full
+  end-to-end run took ~2.5 hr of model time (2–4 min/pg); transcriptions cache to
+  `cache/uocr/p{page}.html`, so it is resumable — re-runs re-parse in ~10 s.
 - **Unlimited-OCR is GPU-first.** `uocr.py` forces CPU via a `torch.Tensor.cuda`
   monkeypatch + bf16 load. It needs `transformers==4.57.x`, `torch`, `accelerate`,
   `addict`, `einops`, `timm`. On CPU it's slow; the **Arc iGPU (OpenVINO)** is the
@@ -134,10 +142,13 @@ Cache: OCR results cache under `cache/` (deterministic); Gemini reads cache unde
 1. **Dashboard** — turn `outputs/` into a browsable monthly view: auto-verified vs
    QC-resolved vs needs-review, each value tagged `deterministic / gemini / uocr`
    with its provenance box. (This was the original "host & share" goal.)
-2. **Arc iGPU for `--qc uocr`** — OpenVINO/DirectML to bring local QC from minutes to
-   seconds per page, making the fully-offline path practical at scale.
-3. **Overnight `--qc uocr` full run** — measure the true local resolve-rate over all
-   flagged pages.
+2. **Arc iGPU for `--qc uocr`** — the torch `2.12.1+xpu` wheel runs on the Arc 140T
+   (bf16 matmul verified fast), but loading the 3.3B model needs commit headroom the
+   default 8–16 GB pagefile lacks (`OSError 1455`); bump the pagefile, then remap the
+   model's hardcoded `.cuda()`→`.to('xpu')` + autocast `cuda`→`xpu`. Would cut local
+   QC from minutes to seconds per page.
+3. ~~Overnight `--qc uocr` full run~~ — **DONE.** Measured: 67 resolved + 19
+   corroborated + 11 human (§3).
 4. **Robust Gemini key handling** — move off the hard-coded external `.env` path.
 
 ---

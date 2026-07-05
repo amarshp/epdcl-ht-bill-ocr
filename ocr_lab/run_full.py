@@ -21,7 +21,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, os.path.dirname(__file__))
 from common import classify, ocr
 from parse import parse
-from reconcile import page_needs_review, reconcile
+from reconcile import bottomline_reconciles, page_needs_review, reconcile
 from sparse import is_sparse, sparse_parse
 
 try:
@@ -53,7 +53,7 @@ def get_qc(mode):
     import uocr  # local Unlimited-OCR (lazy: heavy)
 
     return (
-        lambda p: uocr.parse_fields(uocr.transcribe(page_image(p)))
+        lambda p: uocr.parse_fields(uocr.transcribe(page_image(p), p))
     ), gemini_chain_ok
 
 
@@ -92,7 +92,7 @@ def main():
     qc_read, qc_ok = get_qc(qc_mode)
     kinds = {}
     chain_ok = bills = needs_review = 0
-    qc_attempted = qc_resolved = 0
+    qc_attempted = qc_resolved = corroborated = 0
     t0 = time.time()
     with open(os.path.join(OUT, "extract.jsonl"), "w", encoding="utf-8") as jf, open(
         os.path.join(OUT, "table.csv"), "w", newline="", encoding="utf-8"
@@ -137,6 +137,12 @@ def main():
                     if resolved:
                         review = False
                         qc_resolved += 1
+                if review and bottomline_reconciles(fields):
+                    # full chain didn't close, but the printed bottom line
+                    # self-reconciles (identity A) — accept, don't route to human
+                    review = False
+                    corroborated += 1
+                    row["corroborated"] = True
                 row["needs_review"] = review
                 needs_review += review
                 cw.writerow(
@@ -157,6 +163,7 @@ def main():
         "qc_mode": qc_mode,
         "qc_attempted": qc_attempted,
         "qc_resolved": qc_resolved,
+        "corroborated": corroborated,  # rescued by bottom-line identity-A
         "needs_review": needs_review,  # residual after QC (human queue)
         "auto_verified": bills - needs_review,  # deterministic-clean + QC-resolved
         "chain_ok": chain_ok,

@@ -97,3 +97,42 @@ def test_pooled_cost_is_negative_on_p32():
     _, recs = parse(ocr(32))
     pc = [r for r in recs if r["field"] == "pooled_cost"]
     assert pc and pc[0]["value"] < 0
+
+
+def test_uocr_arrears_regex_skips_interposed_date():
+    """Regression: local QC prints '(Current Years)Arrears after 01-Apr-2024 -436.00'.
+    The date's digits used to halt the label->value skip, dropping the value (10
+    flagged pages fell to human for this alone)."""
+    import uocr
+
+    html = "Net Bill Amount 396044.00 (Current Years)Arrears after 01-Apr-2024 -436.00"
+    f = uocr.parse_fields(html)
+    assert f["arrears_curr"] == -436.00
+    assert f["net_bill"] == 396044.00
+
+
+def test_bottomline_reconciles_identity_a():
+    """Bottom-line rescue: accept a flagged page whose printed anchors satisfy
+    net_payable == net_bill + arrears to the paise; reject otherwise. Negative
+    case uses p81's real values (A off by ~1e6 — a genuine net_payable misread)."""
+    from reconcile import bottomline_reconciles
+
+    def fld(v, low=False):
+        return {"value": v, "low_confidence": low}
+
+    ok = {
+        "net_bill": fld(543241.0),
+        "arrears_curr": fld(-507.0),
+        "net_payable": fld(542734.0),
+    }
+    assert bottomline_reconciles(ok) is True
+    p81 = {
+        "net_bill": fld(512036.0),
+        "arrears_curr": fld(492909.0),
+        "net_payable": fld(19127.0),
+    }
+    assert bottomline_reconciles(p81) is False
+    lowc = {**ok, "net_bill": fld(543241.0, low=True)}
+    assert bottomline_reconciles(lowc) is False  # never accept a doubted read
+    missing = {"net_bill": fld(543241.0), "net_payable": fld(542734.0)}
+    assert bottomline_reconciles(missing) is False  # arrears absent
